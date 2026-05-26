@@ -35,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Include routers after app creation
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
