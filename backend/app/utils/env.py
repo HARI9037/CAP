@@ -1,12 +1,50 @@
 import os
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
+ENV_FILE = BASE_DIR / ".env"
+ENV_KEYS = (
+    "APP_NAME",
+    "APP_VERSION",
+    "LOG_LEVEL",
+    "DEMO_MODE",
+    "CAP_DB_PATH",
+    "CORS_ORIGINS",
+    "GROQ_API_KEY",
+    "GROQ_API_URL",
+    "GROQ_MODEL",
+    "GROQ_TIMEOUT_SECONDS",
+)
+
+
+def _clean_env_value(raw_value: object) -> str | None:
+    if raw_value is None:
+        return None
+    value = str(raw_value).strip()
+    if not value:
+        return None
+    return value
+
+
+def load_environment() -> None:
+    file_values = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
+
+    for key in ENV_KEYS:
+        process_value = _clean_env_value(os.getenv(key))
+        file_value = _clean_env_value(file_values.get(key))
+        value = process_value or file_value
+
+        if value is not None:
+            os.environ[key] = value
+        elif key in os.environ and not os.environ[key].strip():
+            os.environ.pop(key, None)
+
+
+def _env_value(key: str) -> str | None:
+    return _clean_env_value(os.getenv(key))
 
 
 def _as_bool(raw_value: str | None, default: bool = False) -> bool:
@@ -30,6 +68,15 @@ def _resolve_db_path(raw_value: str | None) -> Path:
     return (BASE_DIR / candidate).resolve()
 
 
+def _as_float(raw_value: str | None, default: float) -> float:
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -38,19 +85,39 @@ class Settings:
     demo_mode: bool
     db_path: Path
     cors_origins: list[str]
+    groq_api_key: str | None = None
+    groq_api_url: str = "https://api.groq.com/openai/v1/chat/completions"
+    groq_model: str = "llama-3.1-8b-instant"
+    groq_timeout_seconds: float = 8.0
 
 
-@lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Build settings from the current process environment.
+
+    Call :func:`load_environment` (or :func:`initialize_settings`) before this
+    in application code so values from ``backend/.env`` are present.
+    """
     return Settings(
-        app_name=os.getenv("APP_NAME", "CAP Backend"),
-        app_version=os.getenv("APP_VERSION", "0.1.0"),
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
-        demo_mode=_as_bool(os.getenv("DEMO_MODE"), default=False),
-        db_path=_resolve_db_path(os.getenv("CAP_DB_PATH")),
-        cors_origins=_parse_cors_origins(os.getenv("CORS_ORIGINS")),
+        app_name=_env_value("APP_NAME") or "CAP Backend",
+        app_version=_env_value("APP_VERSION") or "0.1.0",
+        log_level=_env_value("LOG_LEVEL") or "INFO",
+        demo_mode=_as_bool(_env_value("DEMO_MODE"), default=False),
+        db_path=_resolve_db_path(_env_value("CAP_DB_PATH")),
+        cors_origins=_parse_cors_origins(_env_value("CORS_ORIGINS")),
+        groq_api_key=_env_value("GROQ_API_KEY"),
+        groq_api_url=(
+            _env_value("GROQ_API_URL")
+            or "https://api.groq.com/openai/v1/chat/completions"
+        ),
+        groq_model=_env_value("GROQ_MODEL") or "llama-3.1-8b-instant",
+        groq_timeout_seconds=_as_float(
+            _env_value("GROQ_TIMEOUT_SECONDS"),
+            default=8.0,
+        ),
     )
 
 
-def clear_settings_cache() -> None:
-    get_settings.cache_clear()
+def initialize_settings() -> Settings:
+    """Load ``backend/.env`` once for this process, then return application settings."""
+    load_environment()
+    return get_settings()

@@ -5,19 +5,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.memory.store import memory_store
 from app.routes import chat, confirm, health, memory
-from app.utils.env import Settings, get_settings
+from app.utils.env import Settings, initialize_settings
 from app.utils.logging import configure_logging
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    active_settings = settings or get_settings()
+    active_settings = settings or initialize_settings()
     configure_logging(active_settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        runtime_settings = app.state.settings
         memory_store.initialize(
-            db_path=active_settings.db_path,
-            demo_mode=active_settings.demo_mode,
+            db_path=runtime_settings.db_path,
+            demo_mode=runtime_settings.demo_mode,
         )
         yield
 

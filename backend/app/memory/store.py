@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,8 +94,8 @@ class MemoryStore:
             """,
             (
                 demo_session_id,
-                "Demo workflow seeded for hackathon judging mode.",
-                '{"phase":"seeded"}',
+                "User is configuring a new server deployment and requested architecture review.",
+                '{"phase":"architecture_review", "last_action":"generate_diagram"}',
                 now,
                 now,
             ),
@@ -107,11 +108,11 @@ class MemoryStore:
             (
                 demo_session_id,
                 "user",
-                "Resume my onboarding workflow from yesterday.",
+                "Can you review the AWS architecture diagram we worked on yesterday? I want to make sure the load balancer is set up correctly.",
                 now,
                 demo_session_id,
                 "assistant",
-                "Demo context restored. Ready to continue onboarding.",
+                "I have retrieved the AWS architecture diagram from our previous session. The application load balancer is correctly routing to your target groups in the public subnets. Would you like me to analyze the security group rules next?",
                 now,
             ),
         )
@@ -152,6 +153,74 @@ class MemoryStore:
                     (now, session_id),
                 )
                 connection.commit()
+
+    def get_session_history(self, session_id: str) -> list[dict]:
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT role, content
+                    FROM messages
+                    WHERE session_id = ?
+                    ORDER BY id ASC;
+                    """,
+                    (session_id,),
+                ).fetchall()
+        return [{"role": role, "content": content} for role, content in rows]
+
+    def get_session_phase(self, session_id: str) -> str:
+        with self._lock:
+            with self._connect() as connection:
+                workflow_state = self._read_workflow_state(connection, session_id)
+        return workflow_state.get("phase") or "general_chat"
+
+    def store_pending_actions(self, session_id: str, pending_actions: list[dict]) -> None:
+        self.update_session_workflow_state(
+            session_id=session_id,
+            updates={
+                "pending_actions": pending_actions,
+                "state": "awaiting_confirmation",
+            },
+        )
+
+    def update_session_workflow_state(self, session_id: str, updates: dict) -> None:
+        now = _utc_now_iso()
+        with self._lock:
+            with self._connect() as connection:
+                workflow_state = self._read_workflow_state(connection, session_id)
+                workflow_state.update(updates)
+                connection.execute(
+                    """
+                    UPDATE sessions
+                    SET workflow_state = ?, updated_at = ?
+                    WHERE session_id = ?;
+                    """,
+                    (json.dumps(workflow_state), now, session_id),
+                )
+                connection.commit()
+
+    def _read_workflow_state(
+        self,
+        connection: sqlite3.Connection,
+        session_id: str,
+    ) -> dict:
+        row = connection.execute(
+            """
+            SELECT workflow_state
+            FROM sessions
+            WHERE session_id = ?;
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None or not row[0]:
+            return {}
+        try:
+            parsed_state = json.loads(row[0])
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed_state, dict):
+            return parsed_state
+        return {}
 
     def get_session_summary(self, session_id: str | None = None) -> dict:
         with self._lock:
