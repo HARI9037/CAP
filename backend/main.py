@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.memory.store import memory_store
@@ -27,25 +27,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=active_settings.app_version,
         lifespan=lifespan,
     )
+
     app.state.settings = active_settings
+
+    # ---------------------------
+    # CORS (Netlify safe config)
+    # ---------------------------
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=["*"],  # safe for hackathon/demo
+        allow_credentials=False,  # IMPORTANT: must be False with "*"
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    @app.middleware("http")
-async def cap_debug_middleware(request, call_next):
-    response = await call_next(request)
-    response.headers["X-CAP-DEBUG"] = "active"
-    return response
 
-# Include routers after app creation
+    # ---------------------------
+    # Debug Middleware
+    # ---------------------------
+    @app.middleware("http")
+    async def cap_debug_middleware(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-CAP-DEBUG"] = "active"
+        return response
+
+    # ---------------------------
+    # Routes
+    # ---------------------------
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
     app.include_router(memory.router)
+
     return app
 
 
