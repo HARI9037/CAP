@@ -5,6 +5,8 @@ export function useChat() {
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(false);
     const [sessionId, setSessionId] = useState(null);
+    const [chatState, setChatState] = useState(null);
+    const [pendingActions, setPendingActions] = useState([]);
 
     const send = async (text) => {
         setLoading(true);
@@ -17,6 +19,17 @@ export function useChat() {
         if (response.session_id) {
             setSessionId(response.session_id);
         }
+        // capture backend state and pending actions
+        if (response.state) {
+            setChatState(response.state);
+        } else {
+            setChatState(null);
+        }
+        if (Array.isArray(response.pending_actions)) {
+            setPendingActions(response.pending_actions);
+        } else {
+            setPendingActions([]);
+        }
 
         const botMsg = {
             role: "assistant",
@@ -24,7 +37,6 @@ export function useChat() {
         };
 
         setMessages((prev) => [...prev, botMsg]);
-
         setLoading(false);
     };
 
@@ -33,5 +45,7 @@ export function useChat() {
         send,
         loading,
         sessionId,
+        chatState,
+        pendingActions,
     };
 }

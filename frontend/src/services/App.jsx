@@ -3,6 +3,7 @@ import { useChat } from "./hooks/useChat";
 
 function App() {
     const [input, setInput] = useState("");
+    const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
     const { messages, send, loading } = useChat();
 
     return (
@@ -29,7 +30,7 @@ function App() {
                     setInput("");
                 }}
             >
-                {loading ? "..." : "Send"}
+                {loading ? "CAP is thinking..." : "Send"}
             </button>
         </div>
     );
