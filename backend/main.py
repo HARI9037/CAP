@@ -30,12 +30,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = active_settings
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=active_settings.cors_origins,
-        allow_credentials=False,
+        allow_origin_regex=r"https://.*netlify\.app",
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Include routers after app creation
+    @app.middleware("http")
+async def cap_debug_middleware(request, call_next):
+    response = await call_next(request)
+    response.headers["X-CAP-DEBUG"] = "active"
+    return response
+
+# Include routers after app creation
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
