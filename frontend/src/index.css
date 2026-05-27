@@ -1,0 +1,8 @@
+/* Minimal styling for CAP frontend */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #0f1117;
+  color: #f5f7fa;
+}
