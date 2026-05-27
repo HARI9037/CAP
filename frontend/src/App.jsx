@@ -191,7 +191,7 @@ export default function App() {
               <div
                 style={{
                   maxWidth: "80%",
-                  backgroundColor: m.role === "assistantassistant" ? "#232838" : "#2d4cff",
+                  backgroundColor: m.role === "assistant" ? "#232838" : "#2d4cff",
                   color: "#f5f7fa",
                   borderRadius: "12px",
                   padding: "8px 12px",
