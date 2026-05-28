@@ -1,8 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.orchestrator.service import handle_confirmation
-
+from backend.app.orchestrator.service import handle_confirmation
 router = APIRouter(tags=["confirm"])
 
 

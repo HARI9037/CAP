@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.orchestrator.service import read_memory_summary
-
+from backend.app.orchestrator.service import read_memory_summary
 router = APIRouter(tags=["memory"])
 
 

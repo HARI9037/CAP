@@ -1,6 +1,6 @@
 import textwrap
 from typing import List, Dict, Any
-from app.memory.store import memory_store
+from backend.app.memory.store import memory_store
 
 
 def _summarize_messages(messages: List[Dict[str, Any]]) -> str:
@@ -34,10 +34,12 @@ def build_context(session_id: str) -> Dict[str, Any]:
         workflow_context, llm_messages
     """
     # --- retrieve raw history ------------------------------------------------
-    full_history: List[Dict[str, Any]] = memory_store.get_session_history(session_id) or []
+    full_history: List[Dict[str, Any]
+                       ] = memory_store.get_session_history(session_id) or []
 
     # recent 10 messages (preserve order)
-    recent_messages = full_history[-10:] if len(full_history) > 10 else full_history
+    recent_messages = full_history[-10:] if len(
+        full_history) > 10 else full_history
 
     # older messages summary
     older_messages = full_history[:-10] if len(full_history) > 10 else []
@@ -45,9 +47,11 @@ def build_context(session_id: str) -> Dict[str, Any]:
 
     # --- workflow information ----------------------------------------------
     phase: str = memory_store.get_session_phase(session_id) or ""
-    summary_dict: Dict[str, Any] = memory_store.get_session_summary(session_id) or {}
+    summary_dict: Dict[str, Any] = memory_store.get_session_summary(session_id) or {
+    }
     # workflow_state may be stored under "state" or "workflow_state"
-    workflow_state = summary_dict.get("state") or summary_dict.get("workflow_state") or ""
+    workflow_state = summary_dict.get(
+        "state") or summary_dict.get("workflow_state") or ""
     workflow_context = {"phase": phase, "state": workflow_state}
 
     # --- system context generation ------------------------------------------
