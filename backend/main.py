@@ -1,3 +1,14 @@
+import sys
+import os
+import traceback
+
+try:
+    print("DEBUG: Checking imports...")
+    # Add your existing imports here
+except Exception:
+    print("DEBUG: CRASH DURING IMPORT")
+    traceback.print_exc()
+    sys.exit(1)
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -7,7 +18,6 @@ from backend.app.memory.store import memory_store
 from backend.app.routes import chat, confirm, health, memory
 from backend.app.utils.env import Settings, initialize_settings
 from backend.app.utils.logging import configure_logging
-
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
