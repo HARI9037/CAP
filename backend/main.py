@@ -1,23 +1,19 @@
 import sys
-import os
 import traceback
 
 try:
     print("DEBUG: Checking imports...")
-    # Add your existing imports here
+    from contextlib import asynccontextmanager
+    from fastapi import FastAPI, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from backend.app.memory.store import memory_store
+    from backend.app.routes import chat, confirm, health, memory
+    from backend.app.utils.env import Settings, initialize_settings
+    from backend.app.utils.logging import configure_logging
 except Exception:
     print("DEBUG: CRASH DURING IMPORT")
     traceback.print_exc()
     sys.exit(1)
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-
-from backend.app.memory.store import memory_store
-from backend.app.routes import chat, confirm, health, memory
-from backend.app.utils.env import Settings, initialize_settings
-from backend.app.utils.logging import configure_logging
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -41,29 +37,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.settings = active_settings
 
-    # ---------------------------
-    # CORS (Netlify safe config)
-    # ---------------------------
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # safe for hackathon/demo
-        allow_credentials=False,  # IMPORTANT: must be False with "*"
+        allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # ---------------------------
-    # Debug Middleware
-    # ---------------------------
     @app.middleware("http")
     async def cap_debug_middleware(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-CAP-DEBUG"] = "active"
         return response
 
-    # ---------------------------
-    # Routes
-    # ---------------------------
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(confirm.router)
