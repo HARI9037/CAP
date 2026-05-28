@@ -66,11 +66,19 @@ def get_health_status(settings: Settings) -> dict:
 
 @lru_cache(maxsize=1)
 def _load_system_prompt_template() -> str:
-    spec_text = SPEC_PATH.read_text(encoding="utf-8")
-    marker = "```text"
-    start = spec_text.index(marker) + len(marker)
-    end = spec_text.index("```", start)
-    return spec_text[start:end].strip()
+    try:
+        spec_text = SPEC_PATH.read_text(encoding="utf-8")
+        marker = "```text"
+        start = spec_text.index(marker) + len(marker)
+        end = spec_text.index("```", start)
+        return spec_text[start:end].strip()
+    except Exception as e:
+        logger.error(f"Failed to load system prompt from orchestration specification: {e}")
+        return (
+            "You are Chief AI, an advanced decision intelligence system orchestrator. "
+            "Process the chat message and output responses using strict JSON format matching "
+            "the LLMResponse model definitions."
+        )
 
 
 def _build_system_prompt(current_phase: str) -> str:
@@ -78,10 +86,9 @@ def _build_system_prompt(current_phase: str) -> str:
 
 
 def _ensure_groq_settings(settings: Settings) -> Settings:
-    if settings.groq_api_key:
+    if settings and settings.groq_api_key:
         return settings
-
-    raise ConfigurationError("GROQ_API_KEY is not configured.")
+    raise ConfigurationError("GROQ_API_KEY environment variable is not configured.")
 
 
 def _call_groq_api(
@@ -96,14 +103,15 @@ def _call_groq_api(
         *session_history,
     ]
     payload = {
-        "model": settings.groq_model,
+        "model": settings.groq_model or "llama3-70b-8192",
         "messages": messages,
+        "response_format": {"type": "json_object"}
     }
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
         "Content-Type": "application/json",
     }
-    timeout = httpx.Timeout(settings.groq_timeout_seconds)
+    timeout = httpx.Timeout(settings.groq_timeout_seconds or 30.0)
 
     with httpx.Client(timeout=timeout) as client:
         response = client.post(settings.groq_api_url, json=payload, headers=headers)
@@ -113,7 +121,7 @@ def _call_groq_api(
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("Groq response did not include assistant content.") from exc
+        raise RuntimeError("Groq response structural payload missing assistant content.") from exc
 
 
 def _parse_llm_response(raw_response: str) -> LLMResponse:
@@ -126,20 +134,26 @@ def _build_fallback_result(
     error: str,
     reply: str,
 ) -> ChatResult:
-    memory_store.append_message(session_id, "assistant", reply)
-    memory_store.update_session_workflow_state(
-        session_id=session_id,
-        updates={
-            "phase": "fallback",
-            "pending_actions": [],
-            "state": "fallback",
-        },
-    )
+    try:
+        memory_store.append_message(session_id, "assistant", reply)
+        memory_store.update_session_workflow_state(
+            session_id=session_id,
+            updates={
+                "phase": "fallback",
+                "pending_actions": [],
+                "state": "fallback",
+            },
+        )
+        summary = memory_store.get_session_summary(session_id)
+    except Exception as e:
+        logger.error(f"Memory store update failed during fallback orchestration handling: {e}")
+        summary = {"status": "memory_offline"}
+
     return ChatResult(
         session_id=session_id,
         reply=reply,
         pending_actions=[],
-        memory_summary=memory_store.get_session_summary(session_id),
+        memory_summary=summary,
         state="fallback",
         error=error,
     )
@@ -151,80 +165,76 @@ def process_chat_message(
     settings: Settings | None = None,
 ) -> ChatResult:
     if settings is None:
-        raise RuntimeError("Settings are required for chat orchestration.")
+        raise RuntimeError("System configuration settings are required for orchestration layer execution.")
 
-    active_session_id = memory_store.ensure_session(session_id=session_id)
-    memory_store.append_message(active_session_id, "user", message)
-    current_phase = memory_store.get_session_phase(active_session_id)
-    session_history = memory_store.get_session_history(active_session_id)
+    # Core state initialization
+    try:
+        active_session_id = memory_store.ensure_session(session_id=session_id)
+        memory_store.append_message(active_session_id, "user", message)
+        current_phase = memory_store.get_session_phase(active_session_id) or "initialization"
+        session_history = memory_store.get_session_history(active_session_id) or []
+    except Exception as e:
+        logger.error(f"Failed to process session memory bounds: {e}")
+        return ChatResult(
+            session_id=session_id or "unknown_session",
+            reply="The system memory cache pipeline is recovering. Please resend your request.",
+            pending_actions=[],
+            memory_summary={},
+            state="error",
+            error="memory_store_disconnected"
+        )
 
-    # ------------------------------------------------------------------
-    # ⚡ INTERCEPTOR FOR DISPLAYING LOCAL EMAIL/ACTIONS PAYLOADS
-    # ------------------------------------------------------------------
-    normalized_msg = message.lower().strip()
-    if "show" in normalized_msg or "view" in normalized_msg or "read" in normalized_msg:
-        if "email" in normalized_msg or "draft" in normalized_msg:
-            email_reply_markdown = (
-                "### ✉️ Generated Email Draft\n\n"
-                "**To:** team@qbit.dev\n"
-                "**Subject:** Sync Follow-up & Action Items\n\n"
-                "Hey Team,\n\n"
-                "Following up on our product sync session. We have logged the necessary updates "
-                "to the roadmap and synced items across systems. Let's maintain this momentum.\n\n"
-                "Best,\n"
-                "Chief AI Agent"
-            )
-            memory_store.append_message(active_session_id, "assistant", email_reply_markdown)
-            return ChatResult(
-                session_id=active_session_id,
-                reply=email_reply_markdown,
-                pending_actions=[],
-                memory_summary=memory_store.get_session_summary(active_session_id),
-                state="ready"
-            )
-
+    # Core LLM processing engine
     try:
         raw_llm_response = _call_groq_api(
             session_history=session_history,
             current_phase=current_phase,
             settings=settings,
         )
-    except ConfigurationError:
-        logger.exception("Groq configuration is missing.")
+    except ConfigurationError as exc:
+        logger.exception("Groq provider runtime properties missing.")
         return _build_fallback_result(
             session_id=active_session_id,
             error="groq_configuration_missing",
-            reply=(
-                "GROQ_API_KEY is not configured. Add it to backend/.env "
-                "and restart the backend."
-            ),
+            reply="Infrastructure Config Error: GROQ_API_KEY environment variable is not populated on your Render environment dashboard.",
         )
-    except httpx.TimeoutException:
-        logger.exception("Groq request timed out.")
+    except (httpx.TimeoutException, httpx.ConnectTimeout):
+        logger.exception("Groq gateway timed out.")
         return _build_fallback_result(
             session_id=active_session_id,
             error="groq_timeout",
             reply=TIMEOUT_FALLBACK_REPLY,
         )
-    except httpx.HTTPStatusError:
-        logger.exception("Groq API returned an error response.")
+    except httpx.HTTPStatusError as exc:
+        logger.exception(f"Groq upstream interface error returned status code {exc.response.status_code}")
         return _build_fallback_result(
             session_id=active_session_id,
             error="groq_api_failure",
-            reply=TIMEOUT_FALLBACK_REPLY,
+            reply=f"Upstream API Gateway Error: Received status code {exc.response.status_code} from Groq cloud. Check account balances or service status.",
         )
-    except (httpx.RequestError, RuntimeError, ValueError):
-        logger.exception("Groq request failed.")
+    except Exception as exc:
+        logger.exception("Unhandled runtime error intercepted during pipeline orchestration execution.")
         return _build_fallback_result(
             session_id=active_session_id,
-            error="groq_api_failure",
-            reply=TIMEOUT_FALLBACK_REPLY,
+            error="pipeline_execution_crash",
+            reply=f"Internal Engine Error: {str(exc)}",
         )
 
+    # Structural verification and conversion
     try:
         llm_response = _parse_llm_response(raw_llm_response)
-    except (json.JSONDecodeError, ValidationError):
-        logger.exception("Groq response could not be parsed as a valid LLMResponse.")
+    except (json.JSONDecodeError, ValidationError) as exc:
+        logger.exception("Groq structural payload output failed Pydantic contract definition validation checks.")
+        # Production recovery: if it's text but not strict JSON, try to wrap it cleanly
+        if raw_llm_response and isinstance(raw_llm_response, str) and not raw_llm_response.strip().startswith("{"):
+            memory_store.append_message(active_session_id, "assistant", raw_llm_response)
+            return ChatResult(
+                session_id=active_session_id,
+                reply=raw_llm_response,
+                pending_actions=[],
+                memory_summary=memory_store.get_session_summary(active_session_id),
+                state="ready",
+            )
         return _build_fallback_result(
             session_id=active_session_id,
             error="llm_parse_failure",
