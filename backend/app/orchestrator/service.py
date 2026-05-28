@@ -116,7 +116,18 @@ def _call_groq_api(
 
 
 def _parse_llm_response(raw_response: str) -> LLMResponse:
-    parsed_response = json.loads(raw_response)
+    cleaned = raw_response.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    # Extract first JSON object if there's any prose around it
+    start = cleaned.find("{")
+    end = cleaned.rfind("}") + 1
+    if start != -1 and end > start:
+        cleaned = cleaned[start:end]
+    parsed_response = json.loads(cleaned)
     return LLMResponse.model_validate(parsed_response)
 
 
