@@ -12,8 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from app.memory.store import memory_store
 from app.utils.env import Settings
 
-SPEC_PATH = Path(__file__).resolve(
-).parents[3] / "docs" / "ORCHESTRATION_SPEC.md"
+SPEC_PATH = Path(__file__).resolve().parents[3] / "docs" / "ORCHESTRATION_SPEC.md"
 TIMEOUT_FALLBACK_REPLY = (
     "I'm experiencing a slight network delay on the backend. Could you try sending that again?"
 )
@@ -107,16 +106,14 @@ def _call_groq_api(
     timeout = httpx.Timeout(settings.groq_timeout_seconds)
 
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(settings.groq_api_url,
-                               json=payload, headers=headers)
+        response = client.post(settings.groq_api_url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
 
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(
-            "Groq response did not include assistant content.") from exc
+        raise RuntimeError("Groq response did not include assistant content.") from exc
 
 
 def _parse_llm_response(raw_response: str) -> LLMResponse:
@@ -177,14 +174,12 @@ def process_chat_message(
                 "Best,\n"
                 "Chief AI Agent"
             )
-            memory_store.append_message(
-                active_session_id, "assistant", email_reply_markdown)
+            memory_store.append_message(active_session_id, "assistant", email_reply_markdown)
             return ChatResult(
                 session_id=active_session_id,
                 reply=email_reply_markdown,
                 pending_actions=[],
-                memory_summary=memory_store.get_session_summary(
-                    active_session_id),
+                memory_summary=memory_store.get_session_summary(active_session_id),
                 state="ready"
             )
 
@@ -229,18 +224,15 @@ def process_chat_message(
     try:
         llm_response = _parse_llm_response(raw_llm_response)
     except (json.JSONDecodeError, ValidationError):
-        logger.exception(
-            "Groq response could not be parsed as a valid LLMResponse.")
+        logger.exception("Groq response could not be parsed as a valid LLMResponse.")
         return _build_fallback_result(
             session_id=active_session_id,
             error="llm_parse_failure",
             reply=PARSE_FALLBACK_REPLY,
         )
 
-    pending_actions = [action.model_dump()
-                       for action in llm_response.pending_actions]
-    memory_store.append_message(
-        active_session_id, "assistant", llm_response.reply)
+    pending_actions = [action.model_dump() for action in llm_response.pending_actions]
+    memory_store.append_message(active_session_id, "assistant", llm_response.reply)
 
     if pending_actions:
         memory_store.store_pending_actions(active_session_id, pending_actions)
