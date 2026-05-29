@@ -189,28 +189,29 @@ def test_chat_endpoint_returns_fallback_on_groq_timeout(tmp_path, monkeypatch):
     assert _workflow_state(db_path, "session-2")["phase"] == "fallback"
 
 
-def test_chat_endpoint_returns_fallback_on_invalid_llm_json(tmp_path, monkeypatch):
-    db_path = tmp_path / "invalid-json.db"
+def test_chat_endpoint_returns_plain_text_llm_response(tmp_path, monkeypatch):
+    db_path = tmp_path / "plain-text.db"
 
-    def invalid_json_groq_call(session_history, current_phase, settings):
-        return "not-json"
+    def plain_text_groq_call(session_history, current_phase, settings):
+        return "Here is a focused six-hour execution plan."
 
-    monkeypatch.setattr("app.orchestrator.service._call_groq_api", invalid_json_groq_call)
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", plain_text_groq_call)
     app = create_app(settings=_settings(db_path))
 
     with TestClient(app) as client:
         response = client.post(
             "/chat",
-            json={"message": "Please review this.", "session_id": "session-3"},
+            json={"message": "Please make a plan.", "session_id": "session-3"},
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["ok"] is False
+    assert payload["ok"] is True
     assert payload["session_id"] == "session-3"
-    assert payload["error"] == "llm_parse_failure"
+    assert payload["reply"] == "Here is a focused six-hour execution plan."
+    assert payload["error"] is None
     assert payload["pending_actions"] == []
-    assert payload["state"] == "fallback"
+    assert payload["state"] == "ready"
 
 
 def test_chat_endpoint_returns_fallback_when_groq_key_is_missing(tmp_path):

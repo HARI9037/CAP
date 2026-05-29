@@ -14,11 +14,10 @@ SPEC_PATH = Path(__file__).resolve(
 TIMEOUT_FALLBACK_REPLY = (
     "I'm experiencing a slight network delay on the backend. Could you try sending that again?"
 )
-PARSE_FALLBACK_REPLY = (
-    "I processed your request, but hit a minor formatting glitch. "
-    "Let's continue our architecture review—what would you like to check next?"
-)
 MUTATING_ACTION_TYPES = {"write", "update", "organize", "save", "delete"}
+PARSE_FALLBACK_REPLY = (
+    "I received an empty response from the model. Could you try sending that again?"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +26,7 @@ class ConfigurationError(RuntimeError):
 
 
 class PendingAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     action_id: StrictStr
     action_type: StrictStr
@@ -36,7 +35,7 @@ class PendingAction(BaseModel):
 
 
 class LLMResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     reply: StrictStr
     pending_actions: list[PendingAction] = Field(default_factory=list)
@@ -96,6 +95,7 @@ def _call_groq_api(
     payload = {
         "model": settings.groq_model,
         "messages": messages,
+        "response_format": {"type": "json_object"},
     }
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
@@ -118,6 +118,8 @@ def _call_groq_api(
 
 def _parse_llm_response(raw_response: str) -> LLMResponse:
     cleaned = raw_response.strip()
+    if not cleaned:
+        raise ValueError("LLM response was empty.")
     if cleaned.startswith("```"):
         cleaned = cleaned.split("```")[1]
         if cleaned.startswith("json"):
@@ -128,8 +130,44 @@ def _parse_llm_response(raw_response: str) -> LLMResponse:
     end = cleaned.rfind("}") + 1
     if start != -1 and end > start:
         cleaned = cleaned[start:end]
-    parsed_response = json.loads(cleaned)
-    return LLMResponse.model_validate(parsed_response)
+    try:
+        parsed_response = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return LLMResponse(reply=raw_response.strip(), pending_actions=[])
+
+    if isinstance(parsed_response, str):
+        return LLMResponse(reply=parsed_response, pending_actions=[])
+
+    if isinstance(parsed_response, dict):
+        if "reply" not in parsed_response:
+            content = (
+                parsed_response.get("content")
+                or parsed_response.get("message")
+                or parsed_response.get("response")
+                or parsed_response.get("text")
+            )
+            if isinstance(content, str):
+                parsed_response = {
+                    "reply": content,
+                    "pending_actions": parsed_response.get("pending_actions", []),
+                }
+        if not isinstance(parsed_response.get("pending_actions", []), list):
+            parsed_response["pending_actions"] = []
+        else:
+            valid_actions = []
+            for action in parsed_response.get("pending_actions", []):
+                if (
+                    isinstance(action, dict)
+                    and isinstance(action.get("action_id"), str)
+                    and isinstance(action.get("action_type"), str)
+                    and isinstance(action.get("description"), str)
+                    and isinstance(action.get("payload"), dict)
+                ):
+                    valid_actions.append(action)
+            parsed_response["pending_actions"] = valid_actions
+        return LLMResponse.model_validate(parsed_response)
+
+    return LLMResponse(reply=raw_response.strip(), pending_actions=[])
 
 
 def _build_fallback_result(
@@ -168,33 +206,6 @@ def process_chat_message(
     memory_store.append_message(active_session_id, "user", message)
     current_phase = memory_store.get_session_phase(active_session_id)
     session_history = memory_store.get_session_history(active_session_id)
-
-    # ------------------------------------------------------------------
-    # ⚡ INTERCEPTOR FOR DISPLAYING LOCAL EMAIL/ACTIONS PAYLOADS
-    # ------------------------------------------------------------------
-    normalized_msg = message.lower().strip()
-    if "show" in normalized_msg or "view" in normalized_msg or "read" in normalized_msg:
-        if "email" in normalized_msg or "draft" in normalized_msg:
-            email_reply_markdown = (
-                "### ✉️ Generated Email Draft\n\n"
-                "**To:** team@qbit.dev\n"
-                "**Subject:** Sync Follow-up & Action Items\n\n"
-                "Hey Team,\n\n"
-                "Following up on our product sync session. We have logged the necessary updates "
-                "to the roadmap and synced items across systems. Let's maintain this momentum.\n\n"
-                "Best,\n"
-                "Chief AI Agent"
-            )
-            memory_store.append_message(
-                active_session_id, "assistant", email_reply_markdown)
-            return ChatResult(
-                session_id=active_session_id,
-                reply=email_reply_markdown,
-                pending_actions=[],
-                memory_summary=memory_store.get_session_summary(
-                    active_session_id),
-                state="ready"
-            )
 
     try:
         raw_llm_response = _call_groq_api(
@@ -236,7 +247,7 @@ def process_chat_message(
 
     try:
         llm_response = _parse_llm_response(raw_llm_response)
-    except (json.JSONDecodeError, ValidationError):
+    except (ValueError, ValidationError):
         logger.exception(
             "Groq response could not be parsed as a valid LLMResponse.")
         return _build_fallback_result(
