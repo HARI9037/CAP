@@ -6,8 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from groq import Groq
+from backend.app.api.chat import router as chat_router
 
 app = FastAPI()
+
+app.include_router(chat_router)
 
 # Enable CORS for Vercel frontend
 app.add_middleware(
