@@ -33,8 +33,7 @@ class MemoryStore:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        session_id TEXT PRIMARY KEY,
+                    CREATE TABLE IF NOT EXISTS sessions (\n                        session_id TEXT PRIMARY KEY,
                         summary TEXT NOT NULL DEFAULT '',
                         workflow_state TEXT NOT NULL DEFAULT '{}',
                         created_at TEXT NOT NULL,
@@ -44,105 +43,114 @@ class MemoryStore:
                 )
                 connection.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS messages (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    CREATE TABLE IF NOT EXISTS messages (\n                        message_id TEXT PRIMARY KEY,
                         session_id TEXT NOT NULL,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+                        timestamp TEXT NOT NULL,
+                        FOREIGN KEY (session_id) REFERENCES sessions (session_id)
                     );
                     """
                 )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS research_references (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        source_url TEXT NOT NULL,
-                        captured_at TEXT NOT NULL,
-                        FOREIGN KEY(session_id) REFERENCES sessions(session_id)
-                    );
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS user_preferences (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    );
-                    """
-                )
-                if demo_mode and self._is_empty(connection):
-                    self._seed_demo_workflow(connection)
                 connection.commit()
 
-    def _is_empty(self, connection: sqlite3.Connection) -> bool:
-        cursor = connection.execute("SELECT COUNT(*) FROM sessions;")
-        session_count = cursor.fetchone()[0]
-        return session_count == 0
+            if demo_mode:
+                self._seed_demo_data()
 
-    def _seed_demo_workflow(self, connection: sqlite3.Connection) -> None:
+    def _seed_demo_data(self) -> None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM sessions;").fetchone()
+            if row and row[0] > 0:
+                return
+
+            demo_session_id = "demo-session-001"
+            now = _utc_now_iso()
+
+            demo_workflow = {
+                "state": "awaiting_confirmation",
+                "pending_actions": [
+                    {
+                        "action_id": "act-991",
+                        "action_type": "write",
+                        "description": "Create background architectural specifications tracking file.",
+                        "payload": {
+                            "path": "docs/ORCHESTRATION_SPEC.md",
+                            "content": "# Interception Core\nTracking system verification rules."
+                        }
+                    }
+                ]
+            }
+
+            connection.execute(
+                """
+                INSERT INTO sessions (session_id, summary, workflow_state, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (
+                    demo_session_id,
+                    "Reviewing core terminal system configuration and interceptor loop limits.",
+                    json.dumps(demo_workflow),
+                    now,
+                    now,
+                ),
+            )
+
+            messages = [
+                ("msg-1", "user",
+                 "Can you help me initialize the core pipeline verification docs?"),
+                ("msg-2", "assistant", "Sure, I've staged an action to build out your validation tracking layer. Please confirm the payload execution."),
+            ]
+            for msg_id, role, content in messages:
+                connection.execute(
+                    """
+                    INSERT INTO messages (message_id, session_id, role, content, timestamp)
+                    VALUES (?, ?, ?, ?, ?);
+                    """,
+                    (msg_id, demo_session_id, role, content, now),
+                )
+            connection.commit()
+
+    def create_session(self) -> str:
+        session_id = str(uuid4())
         now = _utc_now_iso()
-        demo_session_id = "demo-session"
-        connection.execute(
-            """
-            INSERT INTO sessions (session_id, summary, workflow_state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?);
-            """,
-            (
-                demo_session_id,
-                "User is configuring a new server deployment and requested architecture review.",
-                '{"phase":"architecture_review", "last_action":"generate_diagram"}',
-                now,
-                now,
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO messages (session_id, role, content, created_at)
-            VALUES (?, ?, ?, ?), (?, ?, ?, ?);
-            """,
-            (
-                demo_session_id,
-                "user",
-                "Can you review the AWS architecture diagram we worked on yesterday? I want to make sure the load balancer is set up correctly.",
-                now,
-                demo_session_id,
-                "assistant",
-                "I have retrieved the AWS architecture diagram from our previous session. The application load balancer is correctly routing to your target groups in the public subnets. Would you like me to analyze the security group rules next?",
-                now,
-            ),
-        )
-
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO sessions (session_id, summary, workflow_state, created_at, updated_at)
+                    VALUES (?, '', '{}', ?, ?);
+                    """,
+                    (session_id, now, now),
+                )
+                connection.commit()
+        return session_id
     def ensure_session(self, session_id: str | None = None) -> str:
-        active_session_id = session_id or str(uuid4())
-        now = _utc_now_iso()
-        with self._lock:
-            with self._connect() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO sessions (session_id, created_at, updated_at)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(session_id) DO UPDATE SET updated_at=excluded.updated_at;
-                    """,
-                    (active_session_id, now, now),
-                )
-                connection.commit()
-        return active_session_id
+        if session_id:
+            with self._lock:
+                with self._connect() as connection:
+                    row = connection.execute("SELECT 1 FROM sessions WHERE session_id = ?;", (session_id,)).fetchone()
+                    if row:
+                        return session_id
+        return self.create_session()
 
+    def get_session_phase(self, session_id: str) -> str:
+        with self._lock:
+            with self._connect() as connection:
+                state = self._read_workflow_state(connection, session_id)
+                return state.get("phase", "ready")
+                
     def append_message(self, session_id: str, role: str, content: str) -> None:
+        message_id = str(uuid4())
         now = _utc_now_iso()
         with self._lock:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    INSERT INTO messages (session_id, role, content, created_at)
-                    VALUES (?, ?, ?, ?);
+                    INSERT INTO messages (message_id, session_id, role, content, timestamp)
+                    VALUES (?, ?, ?, ?, ?);
                     """,
-                    (session_id, role, content, now),
+                    (message_id, session_id, role, content, now),
                 )
                 connection.execute(
                     """
@@ -157,53 +165,21 @@ class MemoryStore:
     def get_session_history(self, session_id: str) -> list[dict]:
         with self._lock:
             with self._connect() as connection:
-                rows = connection.execute(
+                cursor = connection.execute(
                     """
-                    SELECT role, content
+                    SELECT role, content, timestamp
                     FROM messages
                     WHERE session_id = ?
-                    ORDER BY id ASC;
+                    ORDER BY timestamp ASC;
                     """,
                     (session_id,),
-                ).fetchall()
-        return [{"role": role, "content": content} for role, content in rows]
-
-    def get_session_phase(self, session_id: str) -> str:
-        with self._lock:
-            with self._connect() as connection:
-                workflow_state = self._read_workflow_state(connection, session_id)
-        return workflow_state.get("phase") or "general_chat"
-
-    def store_pending_actions(self, session_id: str, pending_actions: list[dict]) -> None:
-        self.update_session_workflow_state(
-            session_id=session_id,
-            updates={
-                "pending_actions": pending_actions,
-                "state": "awaiting_confirmation",
-            },
-        )
-
-    def update_session_workflow_state(self, session_id: str, updates: dict) -> None:
-        now = _utc_now_iso()
-        with self._lock:
-            with self._connect() as connection:
-                workflow_state = self._read_workflow_state(connection, session_id)
-                workflow_state.update(updates)
-                connection.execute(
-                    """
-                    UPDATE sessions
-                    SET workflow_state = ?, updated_at = ?
-                    WHERE session_id = ?;
-                    """,
-                    (json.dumps(workflow_state), now, session_id),
                 )
-                connection.commit()
+                return [
+                    {"role": row[0], "content": row[1], "timestamp": row[2]}
+                    for row in cursor.fetchall()
+                ]
 
-    def _read_workflow_state(
-        self,
-        connection: sqlite3.Connection,
-        session_id: str,
-    ) -> dict:
+    def _read_workflow_state(self, connection: sqlite3.Connection, session_id: str) -> dict:
         row = connection.execute(
             """
             SELECT workflow_state
@@ -212,20 +188,88 @@ class MemoryStore:
             """,
             (session_id,),
         ).fetchone()
-        if row is None or not row[0]:
+        if row is None:
             return {}
         try:
-            parsed_state = json.loads(row[0])
-        except json.JSONDecodeError:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
             return {}
-        if isinstance(parsed_state, dict):
-            return parsed_state
-        return {}
+
+    def get_pending_actions(self, session_id: str) -> list[dict]:
+        with self._lock:
+            with self._connect() as connection:
+                state = self._read_workflow_state(connection, session_id)
+                return state.get("pending_actions") or []
+
+    def store_pending_actions(self, session_id: str, actions: list[dict]) -> None:
+        with self._lock:
+            with self._connect() as connection:
+                current_state = self._read_workflow_state(
+                    connection, session_id)
+                current_state["pending_actions"] = actions
+                current_state["state"] = "awaiting_confirmation" if actions else "ready"
+
+                now = _utc_now_iso()
+                connection.execute(
+                    """
+                    UPDATE sessions
+                    SET workflow_state = ?, updated_at = ?
+                    WHERE session_id = ?;
+                    """,
+                    (json.dumps(current_state), now, session_id),
+                )
+                connection.commit()
+
+    def update_session_workflow_state(self, session_id: str, updates: dict) -> None:
+        with self._lock:
+            with self._connect() as connection:
+                current_state = self._read_workflow_state(
+                    connection, session_id)
+                current_state.update(updates)
+
+                now = _utc_now_iso()
+                connection.execute(
+                    """
+                    UPDATE sessions
+                    SET workflow_state = ?, updated_at = ?
+                    WHERE session_id = ?;
+                    """,
+                    (json.dumps(current_state), now, session_id),
+                )
+                connection.commit()
+
+    def update_session_summary(self, session_id: str, summary: str) -> None:
+        now = _utc_now_iso()
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE sessions
+                    SET summary = ?, updated_at = ?
+                    WHERE session_id = ?;
+                    """,
+                    (summary, now, session_id),
+                )
+                connection.commit()
+
+    def _latest_session_id(self, connection: sqlite3.Connection) -> str | None:
+        row = connection.execute(
+            """
+            SELECT session_id
+            FROM sessions
+            ORDER BY updated_at DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return row[0]
 
     def get_session_summary(self, session_id: str | None = None) -> dict:
         with self._lock:
             with self._connect() as connection:
-                target_session_id = session_id or self._latest_session_id(connection)
+                target_session_id = session_id or self._latest_session_id(
+                    connection)
                 if target_session_id is None:
                     return {
                         "session_id": None,
@@ -255,19 +299,6 @@ class MemoryStore:
                     "message_count": message_count,
                     "updated_at": summary_row[1] if summary_row else None,
                 }
-
-    def _latest_session_id(self, connection: sqlite3.Connection) -> str | None:
-        row = connection.execute(
-            """
-            SELECT session_id
-            FROM sessions
-            ORDER BY updated_at DESC
-            LIMIT 1;
-            """
-        ).fetchone()
-        if row is None:
-            return None
-        return row[0]
 
 
 memory_store = MemoryStore()

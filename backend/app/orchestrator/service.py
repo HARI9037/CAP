@@ -90,7 +90,8 @@ def _call_groq_api(
 
     messages = [
         {"role": "system", "content": _build_system_prompt(current_phase)},
-        *session_history,
+        *[{"role": msg["role"], "content": msg["content"]}
+            for msg in session_history],
     ]
     payload = {
         "model": settings.groq_model,
@@ -262,6 +263,9 @@ def process_chat_message(
         )
         state = "ready"
 
+    summary_text = f"Last turn — User: {message[:80]} | Assistant: {llm_response.reply[:80]}"
+    memory_store.update_session_summary(active_session_id, summary_text)
+
     return ChatResult(
         session_id=active_session_id,
         reply=llm_response.reply,
@@ -279,7 +283,12 @@ def requires_confirmation(action_type: str) -> bool:
     return action_type.strip().lower() in MUTATING_ACTION_TYPES
 
 
-def handle_confirmation(action_id: str, action_type: str, approved: bool) -> dict:
+def handle_confirmation(
+    action_id: str,
+    action_type: str,
+    approved: bool,
+    session_id: str,
+) -> dict:
     if not requires_confirmation(action_type):
         return {
             "ok": True,
@@ -287,6 +296,28 @@ def handle_confirmation(action_id: str, action_type: str, approved: bool) -> dic
             "status": "not_required",
             "message": "Confirmation is not required for read-only actions.",
         }
+
+    with memory_store._connect() as connection:
+        workflow_state = memory_store._read_workflow_state(
+            connection, session_id)
+    pending_actions = workflow_state.get("pending_actions") or []
+
+    if isinstance(pending_actions, list):
+        updated_pending_actions = [
+            action
+            for action in pending_actions
+            if isinstance(action, dict) and action.get("action_id") != action_id
+        ]
+    else:
+        updated_pending_actions = []
+
+    memory_store.update_session_workflow_state(
+        session_id=session_id,
+        updates={
+            "pending_actions": updated_pending_actions,
+            "state": "ready" if not updated_pending_actions else "awaiting_confirmation",
+        },
+    )
 
     return {
         "ok": True,
