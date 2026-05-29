@@ -66,6 +66,36 @@ export function useChat() {
     }
   };
 
+  // 3. Handle Confirmation for pending actions to the backend
+  const handleConfirm = async (actionId, actionType, approved) => {
+    try {
+      // NOTE: Ensure your backend URL is correct for your deployed environment
+      const response = await fetch("http://localhost:8000/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action_id: actionId,
+          action_type: actionType,
+          approved: approved,
+          session_id: sessionId
+        })
+      });
+      const res = await response.json();
+
+      if (res.ok) {
+        // Remove the action from the local queue optimistically
+        setPendingActions((prev) => prev.filter(a => a.action_id !== actionId));
+        
+        // If that was the last action, set state back to ready
+        if (pendingActions.length <= 1) {
+          setChatState("ready");
+        }
+      }
+    } catch (error) {
+      console.error("Confirmation failed:", error);
+    }
+  };
+
   const resetSession = () => {
     setSessionId(null);
     setMessages([]);
@@ -81,6 +111,7 @@ export function useChat() {
     chatState,
     pendingActions,
     resetSession,
-    healthStatus
+    healthStatus,
+    handleConfirm
   };
 }
