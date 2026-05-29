@@ -201,6 +201,19 @@ class MemoryStore:
                     for row in cursor.fetchall()
                 ]
 
+    def delete_session(self, session_id: str) -> None:
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    "DELETE FROM messages WHERE session_id = ?;",
+                    (session_id,),
+                )
+                connection.execute(
+                    "DELETE FROM sessions WHERE session_id = ?;",
+                    (session_id,),
+                )
+                connection.commit()
+
     def _read_workflow_state(self, connection: sqlite3.Connection, session_id: str) -> dict:
         row = connection.execute(
             """

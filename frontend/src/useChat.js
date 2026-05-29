@@ -15,12 +15,12 @@ export function useChat() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Polling engine using the updated /ping endpoint
+  // Polling engine using the backend health endpoint.
   useEffect(() => {
     const checkHealth = async () => {
       try {
         const data = await getHealth();
-        if (data && (data.status === "ok" || data.healthy === true)) {
+        if (data && (data.ok === true || data.status === "ready" || data.healthy === true)) {
           setHealthStatus("ready");
         } else {
           setHealthStatus("unavailable");

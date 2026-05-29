@@ -4,8 +4,6 @@ const BASE_URL = import.meta.env.VITE_API_URL || "https://cap-mvp.onrender.com";
  * Sends a message to the backend within a new or ongoing session context.
  */
 export async function sendMessage(message, session_id = null) {
-    console.log("DEBUG: Attempting to call API at:", `${BASE_URL}/chat`); // ADD THIS
-
     const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: {
@@ -24,7 +22,7 @@ export async function sendMessage(message, session_id = null) {
  * Checks the live engine availability state.
  */
 export async function getHealth() {
-    const res = await fetch(`${BASE_URL}/ping`);
+    const res = await fetch(`${BASE_URL}/health`);
     return await res.json();
 }
 

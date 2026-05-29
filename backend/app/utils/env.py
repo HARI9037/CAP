@@ -18,6 +18,11 @@ ENV_KEYS = (
     "GROQ_MODEL",
     "GROQ_TIMEOUT_SECONDS",
 )
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://cap-mvp.vercel.app",
+)
 
 
 def _clean_env_value(raw_value: object) -> str | None:
@@ -54,9 +59,14 @@ def _as_bool(raw_value: str | None, default: bool = False) -> bool:
 
 
 def _parse_cors_origins(raw_value: str | None) -> list[str]:
+    origins = list(DEFAULT_CORS_ORIGINS)
     if not raw_value:
-        return ["http://localhost:5173", "http://127.0.0.1:5173"]
-    return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+        return origins
+    for origin in raw_value.split(","):
+        cleaned = origin.strip()
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
+    return origins
 
 
 def _resolve_db_path(raw_value: str | None) -> Path:
