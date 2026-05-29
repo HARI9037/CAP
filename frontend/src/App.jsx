@@ -39,7 +39,7 @@ export default function App() {
             <span className="text-[18px] font-bold text-[#06B6D4] ml-1">// OS</span>
           </div>
 
-          {/* PAST SESSIONS SECTION (PRIORITY 1 FIX: Connected to dynamic localStorage) */}
+          {/* PAST SESSIONS SECTION */}
           <div className="flex-1 overflow-y-auto pt-4 pb-2">
             <div className="text-[10px] uppercase text-[#64748B] tracking-wider pl-4 mb-2 font-semibold">
               PAST SESSIONS
@@ -68,8 +68,6 @@ export default function App() {
             </div>
           </div>
         </div>
-
-        {/* PRIORITY 3 FIX: Bottom Profile section block completely removed from here */}
       </div>
 
       {/* MAIN CONTENT AREA */}
@@ -77,14 +75,12 @@ export default function App() {
 
         {/* TOP HEADER BAR */}
         <div className="h-[56px] flex-shrink-0 bg-[#0D1424] border-b border-[#1E293B] flex items-center justify-between px-6 select-none">
-          {/* LEFT SIDE: Dynamic Session Title Display */}
           <div className="text-[15px] font-medium text-white">
             {sessions.find((s) => s.id === sessionId)?.title || "New Chat Session"}
           </div>
 
-          {/* RIGHT SIDE: System Controls & Indicators */}
           <div className="flex items-center gap-3">
-            {/* Backend status pill (PRIORITY 2 FIX: True state reactive verification toggling) */}
+            {/* Backend status pill */}
             <div className="bg-[#111827] border border-[#1E293B] rounded-full px-3 py-1 flex items-center gap-2">
               <div
                 className={`w-2 h-2 rounded-full ${healthStatus === "ready" ? "bg-[#10B981]" : "bg-[#EF4444]"
@@ -149,7 +145,7 @@ export default function App() {
           )}
 
           {/* CHAT MESSAGES STREAM OR EMPTY VIEW STATE */}
-          {messages.length === 0 ? (
+          {messages.length === 0 && !loading ? (
             <div className="flex flex-col items-center justify-center flex-1 p-6 text-center select-none">
               <div className="text-[#06B6D4] text-[32px] font-bold tracking-tight">CAP</div>
               <div className="text-[#64748B] text-[14px] mt-1 font-medium">Context-Aware Partner</div>
@@ -158,11 +154,17 @@ export default function App() {
           ) : (
             <div className="px-6 py-4 flex flex-col gap-6 flex-1">
               {messages.map((msg, index) => {
-                if (msg.role === "user") {
+                // Support both backend naming conventions ('role' or 'sender')
+                const isUser = msg.role === "user" || msg.sender === "user";
+                const content = msg.content || msg.text || msg.message || "";
+
+                if (!content) return null;
+
+                if (isUser) {
                   return (
                     <div key={index} className="flex justify-end w-full">
                       <div className="bg-[#06B6D4] text-white text-[14px] rounded-xl rounded-tr-sm px-4 py-3 max-w-[60%] leading-relaxed break-words shadow-sm font-normal">
-                        {msg.content}
+                        {content}
                       </div>
                     </div>
                   );
@@ -176,7 +178,7 @@ export default function App() {
                         </span>
                       </div>
                       <div className="bg-[#111827] border border-[#1E293B] border-l-2 border-l-[#06B6D4] text-white text-[14px] rounded-xl rounded-tl-sm px-4 py-3 max-w-[70%] leading-relaxed break-words shadow-sm font-normal">
-                        {msg.content}
+                        {content}
                       </div>
                     </div>
                   );

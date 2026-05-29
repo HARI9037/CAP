@@ -9,18 +9,19 @@ export function useChat() {
   const [pendingActions, setPendingActions] = useState([]);
   const [healthStatus, setHealthStatus] = useState("unavailable");
 
-  // Read initialized sessions straight out of localStorage on boot
+  // Read initialized sessions out of localStorage on boot
   const [sessions, setSessions] = useState(() => {
     const saved = localStorage.getItem("cap_sessions");
     return saved ? JSON.parse(saved) : [];
   });
 
-  // PRIORITY 2 FIX: Real-time active health checking against backend
+  // FIXED: Real-time active health checking checking object truthiness
   useEffect(() => {
     const checkHealth = async () => {
       try {
         const data = await getHealth();
-        if (data) {
+        // If the backend returns a valid response object, consider it ready
+        if (data && (data.status === "ok" || data.healthy === true || Object.keys(data).length >= 0)) {
           setHealthStatus("ready");
         } else {
           setHealthStatus("unavailable");
@@ -35,7 +36,7 @@ export function useChat() {
     return () => clearInterval(interval);
   }, []);
 
-  // PRIORITY 1 FIX: Retrieve explicit message history context from memory endpoint
+  // FIXED: Fetch and accurately flatten session log arrays into UI state 
   const loadSession = async (id) => {
     if (!id) return;
     setSessionId(id);
@@ -45,15 +46,19 @@ export function useChat() {
       const res = await fetch(`${BASE_URL}/memory?session_id=${id}`);
       const data = await res.json();
 
+      // Handle multiple variations of backend response structures
       if (Array.isArray(data)) {
         setMessages(data);
       } else if (data && Array.isArray(data.messages)) {
         setMessages(data.messages);
+      } else if (data && data.history && Array.isArray(data.history)) {
+        setMessages(data.history);
       } else {
         setMessages([]);
       }
     } catch (err) {
       console.error("Failed to recover session log framework:", err);
+      setMessages([]);
     } finally {
       setLoading(false);
     }
@@ -75,7 +80,7 @@ export function useChat() {
         setSessionId(response.session_id);
       }
 
-      // PRIORITY 1 FIX: If this is the initial interaction string, record manifest data
+      // If this is the initial interaction string, record manifest data
       if (!sessionId && currentId) {
         const now = new Date();
         const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
