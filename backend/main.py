@@ -51,9 +51,8 @@ class ChatResponse(BaseModel):
     pending_actions: Optional[List[Dict[str, Any]]] = None
 
 
-@app.get("/health")
-async def health_check():
-    """Explicitly returns an object parser target to flip UI badge to READY."""
+@app.get("/ping")
+async def ping_check():
     return {"status": "ok", "healthy": True}
 
 

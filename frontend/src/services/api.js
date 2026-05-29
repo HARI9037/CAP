@@ -22,7 +22,7 @@ export async function sendMessage(message, session_id = null) {
  * Checks the live engine availability state.
  */
 export async function getHealth() {
-    const res = await fetch(`${BASE_URL}/health`);
+    const res = await fetch(`${BASE_URL}/ping`);
     return await res.json();
 }
 
