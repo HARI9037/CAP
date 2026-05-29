@@ -1,15 +1,22 @@
 import { useState, useEffect, useRef } from "react";
 import { useChat } from "./useChat";
 import MessageContent from "./MessageContent";
+import SessionInsightPanel from "./SessionInsightPanel";
 
 export default function App() {
   const [input, setInput] = useState("");
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const {
     messages,
     send,
     loading,
     chatState,
+    sessionPhase,
     pendingActions,
+    memorySummary,
+    lastError,
+    lastApiResult,
+    lastReply,
     sessionId,
     resetSession,
     healthStatus,
@@ -111,6 +118,15 @@ export default function App() {
             </div>
 
             <div className="w-px h-5 bg-[#1E293B]" />
+
+            <button
+              onClick={() => setSessionPanelOpen(true)}
+              className="xl:hidden border border-[#1E293B] text-slate-300 text-[13px] bg-[#111827] rounded-md px-3 py-1.5 hover:border-[#06B6D4] hover:text-[#06B6D4] transition-colors duration-150 font-medium"
+            >
+              Session
+            </button>
+
+            <div className="hidden xl:block w-px h-5 bg-[#1E293B]" />
 
             <button
               onClick={resetSession}
@@ -259,6 +275,54 @@ export default function App() {
           </p>
         </div>
       </div>
+
+      <SessionInsightPanel
+        chatState={chatState}
+        healthStatus={healthStatus}
+        lastApiResult={lastApiResult}
+        lastError={lastError}
+        lastReply={lastReply}
+        loading={loading}
+        memorySummary={memorySummary}
+        messages={messages}
+        pendingActions={pendingActions}
+        sessionPhase={sessionPhase}
+        sessionId={sessionId}
+      />
+
+      {sessionPanelOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/50 xl:hidden">
+          <button
+            className="absolute inset-0 cursor-default"
+            aria-label="Close session panel"
+            onClick={() => setSessionPanelOpen(false)}
+          />
+          <div className="relative w-full px-3 pb-3">
+            <div className="mb-2 flex justify-end">
+              <button
+                onClick={() => setSessionPanelOpen(false)}
+                className="rounded-full border border-[#1E293B] bg-[#0D1424] px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wider text-slate-300"
+              >
+                Close
+              </button>
+            </div>
+            <SessionInsightPanel
+              chatState={chatState}
+              healthStatus={healthStatus}
+              lastApiResult={lastApiResult}
+              lastError={lastError}
+              lastReply={lastReply}
+              loading={loading}
+              memorySummary={memorySummary}
+              messages={messages}
+              pendingActions={pendingActions}
+              sessionPhase={sessionPhase}
+              sessionId={sessionId}
+              variant="drawer"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

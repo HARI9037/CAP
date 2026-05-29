@@ -1,7 +1,15 @@
 services:
-  web:
-    type: web
-    env: python
+  - type: web
+    name: cap-backend
+    runtime: python
+    plan: free
     buildCommand: "pip install -r backend/requirements.txt"
     startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: "/health"
+    envVars:
+      - key: DEMO_MODE
+        value: "false"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false

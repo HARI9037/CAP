@@ -333,6 +333,7 @@ class MemoryStore:
                     "summary": summary_row[0] if summary_row else "",
                     "message_count": message_count,
                     "updated_at": summary_row[1] if summary_row else None,
+                    "workflow_state": self._read_workflow_state(connection, target_session_id),
                 }
 
 

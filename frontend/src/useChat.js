@@ -1,13 +1,18 @@
 import { useState, useEffect } from "react";
 // Make sure this path points correctly to your api.js file
-import { sendMessage, getHealth, deleteSession } from "./services/api";
+import { sendMessage, getHealth, getMemory, deleteSession } from "./services/api";
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [chatState, setChatState] = useState(null);
+  const [sessionPhase, setSessionPhase] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
+  const [memorySummary, setMemorySummary] = useState(null);
+  const [lastError, setLastError] = useState(null);
+  const [lastApiResult, setLastApiResult] = useState(null);
+  const [lastReply, setLastReply] = useState("");
   const [healthStatus, setHealthStatus] = useState("unavailable");
 
   const [sessions, setSessions] = useState(() => {
@@ -39,9 +44,7 @@ export function useChat() {
     setSessionId(id);
     setLoading(true);
     try {
-      const BASE_URL = import.meta.env.VITE_API_URL || "https://cap-mvp.onrender.com";
-      const res = await fetch(`${BASE_URL}/memory?session_id=${id}`);
-      const data = await res.json();
+      const data = await getMemory(id);
 
       if (data && Array.isArray(data.history)) {
         setMessages(data.history);
@@ -50,9 +53,24 @@ export function useChat() {
       } else {
         setMessages([]);
       }
+      const workflowState = data?.memory?.workflow_state || {};
+      setMemorySummary(data?.memory || null);
+      setChatState(workflowState.state || "ready");
+      setSessionPhase(workflowState.phase || "general_chat");
+      setPendingActions(Array.isArray(workflowState.pending_actions) ? workflowState.pending_actions : []);
+      setLastError(null);
+      setLastApiResult({ ok: true, label: "Memory Loaded" });
+      const assistantMessages = (data?.history || []).filter((msg) => msg.role === "assistant");
+      setLastReply(assistantMessages.at(-1)?.content || "");
     } catch (err) {
       console.error("Failed to recover session logs:", err);
       setMessages([]);
+      setMemorySummary(null);
+      setChatState(null);
+      setSessionPhase(null);
+      setPendingActions([]);
+      setLastError("memory_load_failed");
+      setLastApiResult({ ok: false, label: "Memory Error" });
     } finally {
       setLoading(false);
     }
@@ -88,6 +106,14 @@ export function useChat() {
     try {
       const response = await sendMessage(text, sessionId);
       console.log("DEBUG: API Response:", response);
+      const workflowState = response.memory_summary?.workflow_state || {};
+      setChatState(response.state || null);
+      setSessionPhase(workflowState.phase || (response.state === "fallback" ? "fallback" : "general_chat"));
+      setPendingActions(Array.isArray(response.pending_actions) ? response.pending_actions : []);
+      setMemorySummary(response.memory_summary || null);
+      setLastError(response.error || null);
+      setLastApiResult(response.error ? { ok: false, label: response.error } : { ok: true, label: "Chat Synced" });
+      setLastReply(response.reply || "");
       let currentId = sessionId;
       if (response.session_id) {
         currentId = response.session_id;
@@ -118,6 +144,16 @@ export function useChat() {
     } catch (error) {
       console.error(error);
       console.error("DEBUG: CRITICAL ERROR in send:", error);
+      setChatState("offline");
+      setSessionPhase("fallback");
+      setPendingActions([]);
+      setLastError("network_error");
+      setLastApiResult({ ok: false, label: "Network Error" });
+      const botMsg = {
+        role: "assistant",
+        content: "CAP could not reach the backend. Please check the API connection and try again.",
+      };
+      setMessages((prev) => [...prev, botMsg]);
     } finally {
       setLoading(false);
     }
@@ -126,6 +162,13 @@ export function useChat() {
   const resetSession = () => {
     setSessionId(null);
     setMessages([]);
+    setChatState(null);
+    setSessionPhase(null);
+    setPendingActions([]);
+    setMemorySummary(null);
+    setLastError(null);
+    setLastApiResult(null);
+    setLastReply("");
   };
 
   return {
@@ -134,7 +177,12 @@ export function useChat() {
     loading,
     sessionId,
     chatState,
+    sessionPhase,
     pendingActions,
+    memorySummary,
+    lastError,
+    lastApiResult,
+    lastReply,
     resetSession,
     healthStatus,
     sessions,
