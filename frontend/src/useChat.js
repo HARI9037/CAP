@@ -78,6 +78,7 @@ export function useChat() {
   };
 
   const send = async (text) => {
+    console.log("DEBUG: Send clicked, message:", text);
     if (!text.trim()) return;
     setLoading(true);
 
@@ -86,6 +87,7 @@ export function useChat() {
 
     try {
       const response = await sendMessage(text, sessionId);
+      console.log("DEBUG: API Response:", response);
       let currentId = sessionId;
       if (response.session_id) {
         currentId = response.session_id;
@@ -115,6 +117,7 @@ export function useChat() {
       setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
       console.error(error);
+      console.error("DEBUG: CRITICAL ERROR in send:", error);
     } finally {
       setLoading(false);
     }
