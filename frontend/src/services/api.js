@@ -27,14 +27,6 @@ export async function getHealth() {
 }
 
 /**
- * Legacy configuration verification endpoint check.
- */
-export async function getReady() {
-    const res = await fetch(`${BASE_URL}/ready`);
-    return await res.json();
-}
-
-/**
  * Permanently removes a target session sequence from the backend database indices.
  */
 export async function deleteSession(sessionId) {
