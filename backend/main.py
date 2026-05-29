@@ -1,33 +1,31 @@
 import os
 import sqlite3
+import uuid
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import uuid
+from groq import Groq
 
 app = FastAPI()
 
-# ---------------------------------------------------------
-# 1. CORS CONFIGURATION (Allows Netlify to talk to Render)
-# ---------------------------------------------------------
+# Enable CORS for Vercel frontend
 app.add_middleware(
     CORSMiddleware,
-    # In production, you can change this to "https://cap-mvp.netlify.app"
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------
-# 2. DATABASE SETUP
-# ---------------------------------------------------------
+# Initialize Groq Client
+# Ensure you have set GROQ_API_KEY in Render Dashboard -> Environment
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "sessions.db")
 
 
 def init_db():
-    """Initializes the SQLite database structure for persisting session messages."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -44,10 +42,6 @@ def init_db():
 
 init_db()
 
-# ---------------------------------------------------------
-# 3. DATA MODELS
-# ---------------------------------------------------------
-
 
 class ChatRequest(BaseModel):
     message: str
@@ -60,33 +54,26 @@ class ChatResponse(BaseModel):
     state: Optional[Dict[str, Any]] = None
     pending_actions: Optional[List[Dict[str, Any]]] = None
 
-# ---------------------------------------------------------
-# 4. API ENDPOINTS
-# ---------------------------------------------------------
-
 
 @app.get("/ping")
 async def ping_check():
-    """Health check endpoint renamed to /ping to bypass adblockers on the frontend."""
     return {"status": "ok", "healthy": True}
 
 
 @app.get("/health")
 async def health_check():
-    """Legacy endpoint kept strictly to satisfy Render's internal dashboard health monitor."""
     return {"status": "ok", "healthy": True}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
-    # Determine the session ID
     current_session = req.session_id if req.session_id else str(uuid.uuid4())
     user_text = req.message.strip()
 
     if not user_text:
         raise HTTPException(status_code=400, detail="Message context empty")
 
-    # STEP A: Save the User's message to the database
+    # 1. Save User Message to Database
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -95,25 +82,33 @@ async def chat_endpoint(req: ChatRequest):
         )
         conn.commit()
 
-    # =====================================================================
-    # STEP B: 🧠 YOUR ACTUAL AI LOGIC GOES HERE 🧠
-    # =====================================================================
-    # Replace the code below with your actual API calls (OpenAI, Gemini, etc.)
-    # Example:
-    # response = openai.ChatCompletion.create(messages=your_history, model="gpt-4")
-    # ai_reply = response.choices[0].message.content
+    # 2. Build Context from History
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+            (current_session,)
+        )
+        rows = cursor.fetchall()
+        messages = [
+            {"role": "system", "content": "You are CAP, a helpful, context-aware operational partner."}]
+        for row in rows:
+            messages.append({"role": row["role"], "content": row["content"]})
 
-    # -> For now, I am making it echo a slightly smarter response so you know it works:
-    if "hello" in user_text.lower() or "hi" in user_text.lower():
-        ai_reply = "Hello! I am CAP, your Context-Aware Partner. My database is connected, but my LLM brain needs to be wired up by you!"
-    else:
-        ai_reply = f"You just said: '{user_text}'. (Replace this block in main.py with your LLM integration)."
+    # 3. Get AI Response from Groq
+    try:
+        completion = groq_client.chat.completions.create(
+            model="llama-3.3-70b-specdec",
+            messages=messages,
+            temperature=0.7,
+        )
+        ai_reply = completion.choices[0].message.content
+    except Exception as e:
+        ai_reply = "I'm having trouble connecting to my processing core right now. Please try again."
+        print(f"Groq API Error: {e}")
 
-    mock_state = {"current_node": "active", "status": "LLM not connected yet"}
-    mock_actions = []
-    # =====================================================================
-
-    # STEP C: Save the AI's response to the database
+    # 4. Save AI Response
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -125,42 +120,30 @@ async def chat_endpoint(req: ChatRequest):
     return ChatResponse(
         reply=ai_reply,
         session_id=current_session,
-        state=mock_state,
-        pending_actions=mock_actions
+        state={"status": "ready"},
+        pending_actions=[]
     )
 
 
 @app.get("/memory")
-async def get_session_memory(session_id: str = Query(..., description="The unique session identifier string")):
-    """Fetches the complete historical array log belonging to a distinct session."""
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
-                (session_id,)
-            )
-            rows = cursor.fetchall()
-
-            history = [{"role": row["role"], "content": row["content"]}
-                       for row in rows]
-            return {"status": "success", "history": history}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Database extraction failure: {str(e)}")
+async def get_session_memory(session_id: str = Query(...)):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,)
+        )
+        history = [{"role": row["role"], "content": row["content"]}
+                   for row in cursor.fetchall()]
+    return {"status": "success", "history": history}
 
 
 @app.delete("/memory")
-async def delete_session_memory(session_id: str = Query(..., description="Session identifier targeted for erasure")):
-    """Wipes out all corresponding historical messages matching the session ID."""
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM messages WHERE session_id = ?", (session_id,))
-            conn.commit()
-            return {"status": "success", "message": f"Session {session_id} successfully wiped."}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to clear session indices: {str(e)}")
+async def delete_session_memory(session_id: str = Query(...)):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.commit()
+    return {"status": "success"}
