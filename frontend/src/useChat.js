@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 // Make sure this path points correctly to your api.js file
-import { sendMessage, getHealth, deleteSession } from "../services/api";
+import { sendMessage, getHealth, deleteSession } from "./services/api";
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
