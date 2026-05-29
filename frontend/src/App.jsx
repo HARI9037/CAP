@@ -14,10 +14,12 @@ export default function App() {
     healthStatus,
     sessions,
     loadSession,
+    performDeleteSession,
   } = useChat();
 
   const messagesEndRef = useRef(null);
 
+  // Automatically scroll to the bottom of the chat on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
@@ -30,16 +32,18 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0A0F1E]">
-      {/* LEFT SIDEBAR */}
+
+      {/* LEFT SIDEBAR: SESSION MANAGER */}
       <div className="w-[260px] flex-shrink-0 bg-[#0D1424] border-r border-[#1E293B] flex flex-col h-full justify-between select-none">
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* TOP SECTION: Logo Area */}
+
+          {/* Logo Heading */}
           <div className="h-[56px] flex items-center px-4 border-b border-[#1E293B] flex-shrink-0">
             <span className="text-[18px] font-bold text-white">CAP</span>
             <span className="text-[18px] font-bold text-[#06B6D4] ml-1">// OS</span>
           </div>
 
-          {/* PAST SESSIONS SECTION */}
+          {/* Session History Feed */}
           <div className="flex-1 overflow-y-auto pt-4 pb-2">
             <div className="text-[10px] uppercase text-[#64748B] tracking-wider pl-4 mb-2 font-semibold">
               PAST SESSIONS
@@ -51,17 +55,28 @@ export default function App() {
                   <div
                     key={session.id}
                     onClick={() => loadSession(session.id)}
-                    className={`min-h-[40px] px-4 py-2 flex flex-col justify-center cursor-pointer transition-colors duration-150 ${isActive
-                      ? "bg-[#1E293B] border-l-2 border-[#06B6D4]"
-                      : "border-l-2 border-transparent hover:bg-[#151f33]"
+                    className={`group min-h-[44px] px-4 py-2 flex items-center justify-between cursor-pointer transition-colors duration-150 ${isActive
+                        ? "bg-[#1E293B] border-l-2 border-[#06B6D4]"
+                        : "border-l-2 border-transparent hover:bg-[#151f33]"
                       }`}
                   >
-                    <div className="text-[13px] text-white truncate font-normal leading-tight">
-                      {session.title}
+                    <div className="flex flex-col justify-center min-w-0 flex-1">
+                      <div className="text-[13px] text-white truncate font-normal leading-tight">
+                        {session.title}
+                      </div>
+                      <div className="text-[11px] text-[#64748B] mt-0.5 leading-none">
+                        {session.time}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-[#64748B] mt-0.5 leading-none">
-                      {session.time}
-                    </div>
+
+                    {/* Inline Hover Delete Trigger Button */}
+                    <button
+                      onClick={(e) => performDeleteSession(session.id, e)}
+                      className="opacity-0 group-hover:opacity-100 text-[#64748B] hover:text-red-400 text-[12px] pl-2 transition-all font-bold"
+                      title="Delete Session"
+                    >
+                      ✕
+                    </button>
                   </div>
                 );
               })}
@@ -70,17 +85,17 @@ export default function App() {
         </div>
       </div>
 
-      {/* MAIN CONTENT AREA */}
+      {/* RIGHT PANEL: MAIN WORKSPACE */}
       <div className="flex flex-1 flex-col min-w-0">
 
-        {/* TOP HEADER BAR */}
+        {/* TOP STATUS CONTROL BAR */}
         <div className="h-[56px] flex-shrink-0 bg-[#0D1424] border-b border-[#1E293B] flex items-center justify-between px-6 select-none">
-          <div className="text-[15px] font-medium text-white">
+          <div className="text-[15px] font-medium text-white truncate max-w-[400px]">
             {sessions.find((s) => s.id === sessionId)?.title || "New Chat Session"}
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Backend status pill */}
+            {/* Live Polling Engine Badge Status Indicator */}
             <div className="bg-[#111827] border border-[#1E293B] rounded-full px-3 py-1 flex items-center gap-2">
               <div
                 className={`w-2 h-2 rounded-full ${healthStatus === "ready" ? "bg-[#10B981]" : "bg-[#EF4444]"
@@ -111,9 +126,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* MIDDLE CHAT FEED AREA */}
+        {/* MIDDLE LOG VIEWPORT AREA */}
         <div className="flex-1 overflow-y-auto flex flex-col bg-[#0A0F1E]">
-          {/* PENDING ACTIONS PANEL */}
+
+          {/* PENDING ACTIONS SUBPANEL */}
           {pendingActions && pendingActions.length > 0 && (
             <div className="mx-6 mt-6 mb-4 bg-[#111827] border border-[#1E293B] border-l-4 border-l-[#06B6D4] rounded-lg p-4 flex-shrink-0">
               <div className="flex items-center gap-2 select-none">
@@ -144,7 +160,7 @@ export default function App() {
             </div>
           )}
 
-          {/* CHAT MESSAGES STREAM OR EMPTY VIEW STATE */}
+          {/* MESSAGES LAYER OR DEFAULT WELCOME LANDING STATE */}
           {messages.length === 0 && !loading ? (
             <div className="flex flex-col items-center justify-center flex-1 p-6 text-center select-none">
               <div className="text-[#06B6D4] text-[32px] font-bold tracking-tight">CAP</div>
@@ -154,7 +170,6 @@ export default function App() {
           ) : (
             <div className="px-6 py-4 flex flex-col gap-6 flex-1">
               {messages.map((msg, index) => {
-                // Support both backend naming conventions ('role' or 'sender')
                 const isUser = msg.role === "user" || msg.sender === "user";
                 const content = msg.content || msg.text || msg.message || "";
 
@@ -185,7 +200,7 @@ export default function App() {
                 }
               })}
 
-              {/* TYPING LOADER */}
+              {/* ACTIVE STREAM PROCESSING LOADER */}
               {loading && (
                 <div className="flex flex-col items-start w-full">
                   <div className="flex items-center gap-1.5 mb-1 select-none">
@@ -207,7 +222,7 @@ export default function App() {
           )}
         </div>
 
-        {/* BOTTOM INPUT BAR */}
+        {/* BOTTOM USER DISPATCH INTERACTION BAR */}
         <div className="min-h-[80px] flex-shrink-0 bg-[#0D1424] border-t border-[#1E293B] flex items-center px-6 gap-3">
           <span className="text-[#64748B] text-[18px] cursor-pointer select-none hover:text-white transition-colors">
             📎
@@ -236,7 +251,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* FOOTNOTE */}
+        {/* SYSTEM STATUS FOOTNOTE */}
         <div className="py-2 text-center bg-[#0A0F1E] flex-shrink-0 select-none border-t border-[#1E293B]/20">
           <p className="text-[#64748B] text-[11px] italic">
             CAP is in restricted mode. Actions require manual approval.

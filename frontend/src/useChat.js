@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { sendMessage, getHealth } from "./services/api";
+import { sendMessage, getHealth, deleteSession } from "./services/api";
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
@@ -9,19 +9,16 @@ export function useChat() {
   const [pendingActions, setPendingActions] = useState([]);
   const [healthStatus, setHealthStatus] = useState("unavailable");
 
-  // Read initialized sessions out of localStorage on boot
   const [sessions, setSessions] = useState(() => {
     const saved = localStorage.getItem("cap_sessions");
     return saved ? JSON.parse(saved) : [];
   });
 
-  // FIXED: Real-time active health checking checking object truthiness
   useEffect(() => {
     const checkHealth = async () => {
       try {
         const data = await getHealth();
-        // If the backend returns a valid response object, consider it ready
-        if (data && (data.status === "ok" || data.healthy === true || Object.keys(data).length >= 0)) {
+        if (data && (data.status === "ok" || data.healthy === true)) {
           setHealthStatus("ready");
         } else {
           setHealthStatus("unavailable");
@@ -30,13 +27,11 @@ export function useChat() {
         setHealthStatus("unavailable");
       }
     };
-
     checkHealth();
-    const interval = setInterval(checkHealth, 10000); // Poll engine status every 10 seconds
+    const interval = setInterval(checkHealth, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // FIXED: Fetch and accurately flatten session log arrays into UI state 
   const loadSession = async (id) => {
     if (!id) return;
     setSessionId(id);
@@ -46,21 +41,38 @@ export function useChat() {
       const res = await fetch(`${BASE_URL}/memory?session_id=${id}`);
       const data = await res.json();
 
-      // Handle multiple variations of backend response structures
-      if (Array.isArray(data)) {
-        setMessages(data);
-      } else if (data && Array.isArray(data.messages)) {
-        setMessages(data.messages);
-      } else if (data && data.history && Array.isArray(data.history)) {
+      if (data && Array.isArray(data.history)) {
         setMessages(data.history);
+      } else if (Array.isArray(data)) {
+        setMessages(data);
       } else {
         setMessages([]);
       }
     } catch (err) {
-      console.error("Failed to recover session log framework:", err);
+      console.error("Failed to recover session logs:", err);
       setMessages([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW: Erase session target out of both the backend database and UI list view
+  const performDeleteSession = async (id, e) => {
+    if (e) e.stopPropagation(); // Avoid triggering click load mapping rules
+    try {
+      await deleteSession(id);
+
+      setSessions((prev) => {
+        const filtered = prev.filter((s) => s.id !== id);
+        localStorage.setItem("cap_sessions", JSON.stringify(filtered));
+        return filtered;
+      });
+
+      if (sessionId === id) {
+        resetSession();
+      }
+    } catch (err) {
+      print("Could not clean historical record sequence:", err);
     }
   };
 
@@ -73,23 +85,19 @@ export function useChat() {
 
     try {
       const response = await sendMessage(text, sessionId);
-
       let currentId = sessionId;
       if (response.session_id) {
         currentId = response.session_id;
         setSessionId(response.session_id);
       }
 
-      // If this is the initial interaction string, record manifest data
       if (!sessionId && currentId) {
         const now = new Date();
         const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const formattedTime = `Today, ${timeString}`;
-
         const newSession = {
           id: currentId,
-          title: text.length > 28 ? text.substring(0, 28) + "..." : text,
-          time: formattedTime,
+          title: text.length > 24 ? text.substring(0, 24) + "..." : text,
+          time: `Today, ${timeString}`,
         };
 
         setSessions((prev) => {
@@ -99,29 +107,13 @@ export function useChat() {
         });
       }
 
-      if (response.state) {
-        setChatState(response.state);
-      } else {
-        setChatState(null);
-      }
-
-      if (Array.isArray(response.pending_actions)) {
-        setPendingActions(response.pending_actions);
-      } else {
-        setPendingActions([]);
-      }
-
       const botMsg = {
         role: "assistant",
         content: response.reply || response.error || "No response",
       };
       setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
-      console.error("Error during dispatch execution loop:", error);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Error: Terminated handshake connection with backend." },
-      ]);
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -130,20 +122,17 @@ export function useChat() {
   const resetSession = () => {
     setSessionId(null);
     setMessages([]);
-    setChatState(null);
-    setPendingActions([]);
   };
 
   return {
     messages,
     send,
     loading,
-    chatState,
-    pendingActions,
     sessionId,
     resetSession,
     healthStatus,
     sessions,
     loadSession,
+    performDeleteSession, // Exposed to UI
   };
 }
