@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { sendMessage, getHealth, deleteSession } from "./services/api";
+// Make sure this path points correctly to your api.js file
+import { sendMessage, getHealth, deleteSession } from "../services/api";
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
@@ -14,6 +15,7 @@ export function useChat() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Polling engine using the updated /ping endpoint
   useEffect(() => {
     const checkHealth = async () => {
       try {
@@ -56,9 +58,8 @@ export function useChat() {
     }
   };
 
-  // NEW: Erase session target out of both the backend database and UI list view
   const performDeleteSession = async (id, e) => {
-    if (e) e.stopPropagation(); // Avoid triggering click load mapping rules
+    if (e) e.stopPropagation();
     try {
       await deleteSession(id);
 
@@ -72,7 +73,7 @@ export function useChat() {
         resetSession();
       }
     } catch (err) {
-      print("Could not clean historical record sequence:", err);
+      console.error("Could not clean historical record sequence:", err);
     }
   };
 
@@ -129,10 +130,12 @@ export function useChat() {
     send,
     loading,
     sessionId,
+    chatState,
+    pendingActions,
     resetSession,
     healthStatus,
     sessions,
     loadSession,
-    performDeleteSession, // Exposed to UI
+    performDeleteSession,
   };
 }
