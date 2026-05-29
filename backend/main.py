@@ -1,9 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.memory.store import memory_store
-from app.routes import chat, confirm, health, memory
-from app.utils.env import Settings, initialize_settings
+try:
+    from backend.app.memory.store import memory_store
+    from backend.app.routes import chat, confirm, health, memory
+    from backend.app.utils.env import Settings, initialize_settings
+except ModuleNotFoundError:
+    from app.memory.store import memory_store
+    from app.routes import chat, confirm, health, memory
+    from app.utils.env import Settings, initialize_settings
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

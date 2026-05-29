@@ -6,8 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
-from app.memory.store import memory_store
-from app.utils.env import Settings
+from ..memory.store import memory_store
+from ..utils.env import Settings
 
 SPEC_PATH = Path(__file__).resolve(
 ).parents[3] / "docs" / "ORCHESTRATION_SPEC.md"
