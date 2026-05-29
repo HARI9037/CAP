@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useChat } from "./useChat";
+import MessageContent from "./MessageContent";
 
 export default function App() {
   const [input, setInput] = useState("");
@@ -178,7 +179,7 @@ export default function App() {
                 if (isUser) {
                   return (
                     <div key={index} className="flex justify-end w-full">
-                      <div className="bg-[#06B6D4] text-white text-[14px] rounded-xl rounded-tr-sm px-4 py-3 max-w-[60%] leading-relaxed break-words shadow-sm font-normal">
+                      <div className="bg-[#06B6D4] text-white text-[14px] rounded-xl rounded-tr-sm px-5 py-4 max-w-[60%] leading-relaxed break-words shadow-sm font-normal whitespace-pre-wrap">
                         {content}
                       </div>
                     </div>
@@ -192,8 +193,8 @@ export default function App() {
                           CAP
                         </span>
                       </div>
-                      <div className="bg-[#111827] border border-[#1E293B] border-l-2 border-l-[#06B6D4] text-white text-[14px] rounded-xl rounded-tl-sm px-4 py-3 max-w-[70%] leading-relaxed break-words shadow-sm font-normal">
-                        {content}
+                      <div className="bg-[#111827] border border-[#1E293B] border-l-2 border-l-[#06B6D4] text-slate-100 text-[14px] rounded-xl rounded-tl-sm px-5 py-4 max-w-[72%] leading-7 break-words shadow-sm font-normal">
+                        <MessageContent content={content} />
                       </div>
                     </div>
                   );

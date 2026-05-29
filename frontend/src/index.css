@@ -10,3 +10,15 @@ body {
   background-color: #0f1117;
   color: #f5f7fa;
 }
+
+.message-content > :first-child {
+  margin-top: 0;
+}
+
+.message-content > :last-child {
+  margin-bottom: 0;
+}
+
+.message-content li::marker {
+  color: #94a3b8;
+}
