@@ -6,6 +6,9 @@ import SessionInsightPanel from "./SessionInsightPanel";
 export default function App() {
   const [input, setInput] = useState("");
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
+  const [coldStartNoticeOpen, setColdStartNoticeOpen] = useState(() => {
+    return localStorage.getItem("cap_cold_start_notice_seen") !== "true";
+  });
   const {
     messages,
     send,
@@ -36,6 +39,11 @@ export default function App() {
     if (!input.trim() || loading) return;
     send(input.trim());
     setInput("");
+  };
+
+  const dismissColdStartNotice = () => {
+    localStorage.setItem("cap_cold_start_notice_seen", "true");
+    setColdStartNoticeOpen(false);
   };
 
   return (
@@ -320,6 +328,39 @@ export default function App() {
               sessionId={sessionId}
               variant="drawer"
             />
+          </div>
+        </div>
+      )}
+
+      {coldStartNoticeOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-[420px] rounded-lg border border-[#1E293B] bg-[#0D1424] p-5 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-[#F59E0B] shadow-[0_0_18px_rgba(245,158,11,0.65)]" />
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#F59E0B]">
+                  Backend Wake-Up Notice
+                </div>
+                <h2 className="mt-2 text-[18px] font-semibold text-white">
+                  CAP may take a moment to connect
+                </h2>
+                <p className="mt-3 text-[13px] leading-6 text-slate-300">
+                  This demo uses Render for the backend. If the service has been idle, the first message may need about 45-60 seconds while the API wakes up.
+                </p>
+                <div className="mt-4 rounded-md border border-[#1E293B] bg-[#0A0F1E]/70 px-3 py-2 text-[12px] leading-5 text-slate-400">
+                  After the first response, follow-up messages should feel much faster.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={dismissColdStartNotice}
+                className="rounded-md bg-[#06B6D4] px-4 py-2 text-[12px] font-semibold uppercase tracking-wider text-white transition-opacity duration-150 hover:opacity-90"
+              >
+                Got it
+              </button>
+            </div>
           </div>
         </div>
       )}
