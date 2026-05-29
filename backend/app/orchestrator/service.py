@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import logging
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +20,7 @@ PARSE_FALLBACK_REPLY = (
     "I received an empty response from the model. Could you try sending that again?"
 )
 logger = logging.getLogger(__name__)
+TEXT_RESPONSE_KEYS = ("reply", "message", "content", "response", "text")
 
 
 class ConfigurationError(RuntimeError):
@@ -131,26 +133,33 @@ def _parse_llm_response(raw_response: str) -> LLMResponse:
     if start != -1 and end > start:
         cleaned = cleaned[start:end]
     try:
-        parsed_response = json.loads(cleaned)
+        parsed_response = json.loads(cleaned, strict=False)
     except json.JSONDecodeError:
-        return LLMResponse(reply=raw_response.strip(), pending_actions=[])
+        extracted_reply = _extract_text_from_jsonish_response(cleaned)
+        if extracted_reply:
+            return LLMResponse(reply=_clean_reply_text(extracted_reply), pending_actions=[])
+        return LLMResponse(reply=_clean_reply_text(raw_response.strip()), pending_actions=[])
 
     if isinstance(parsed_response, str):
-        return LLMResponse(reply=parsed_response, pending_actions=[])
+        return LLMResponse(reply=_clean_reply_text(parsed_response), pending_actions=[])
 
     if isinstance(parsed_response, dict):
         if "reply" not in parsed_response:
-            content = (
-                parsed_response.get("content")
-                or parsed_response.get("message")
-                or parsed_response.get("response")
-                or parsed_response.get("text")
+            content = next(
+                (
+                    parsed_response.get(key)
+                    for key in TEXT_RESPONSE_KEYS
+                    if isinstance(parsed_response.get(key), str)
+                ),
+                None,
             )
             if isinstance(content, str):
                 parsed_response = {
-                    "reply": content,
+                    "reply": _clean_reply_text(content),
                     "pending_actions": parsed_response.get("pending_actions", []),
                 }
+        elif isinstance(parsed_response["reply"], str):
+            parsed_response["reply"] = _clean_reply_text(parsed_response["reply"])
         if not isinstance(parsed_response.get("pending_actions", []), list):
             parsed_response["pending_actions"] = []
         else:
@@ -167,7 +176,39 @@ def _parse_llm_response(raw_response: str) -> LLMResponse:
             parsed_response["pending_actions"] = valid_actions
         return LLMResponse.model_validate(parsed_response)
 
-    return LLMResponse(reply=raw_response.strip(), pending_actions=[])
+    return LLMResponse(reply=_clean_reply_text(raw_response.strip()), pending_actions=[])
+
+
+def _extract_text_from_jsonish_response(raw_response: str) -> str | None:
+    if not raw_response.lstrip().startswith("{"):
+        return None
+
+    for key in TEXT_RESPONSE_KEYS:
+        match = re.search(
+            rf'"{re.escape(key)}"\s*:\s*"(?P<value>.*?)(?<!\\)"\s*(?:,|\}})',
+            raw_response,
+            flags=re.DOTALL,
+        )
+        if not match:
+            continue
+        value = match.group("value")
+        try:
+            return json.loads(f'"{value}"', strict=False)
+        except json.JSONDecodeError:
+            return value.replace("\\n", "\n").replace('\\"', '"').strip()
+
+    return None
+
+
+def _clean_reply_text(reply: str) -> str:
+    cleaned = reply.strip()
+    cleaned = re.sub(
+        r"\n*\s*\*{0,2}Pending Actions:?[\s\S]*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()
 
 
 def _build_fallback_result(

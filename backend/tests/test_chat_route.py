@@ -214,6 +214,33 @@ def test_chat_endpoint_returns_plain_text_llm_response(tmp_path, monkeypatch):
     assert payload["state"] == "ready"
 
 
+def test_chat_endpoint_extracts_message_from_jsonish_llm_response(tmp_path, monkeypatch):
+    db_path = tmp_path / "jsonish-message.db"
+
+    def jsonish_groq_call(session_history, current_phase, settings):
+        return (
+            '{"message":"Here is your prep material.\n'
+            'Focus on the demo first.\n\n'
+            '**Pending Actions: []"}'
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", jsonish_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={"message": "Give prep material.", "session_id": "session-jsonish"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["reply"] == "Here is your prep material.\nFocus on the demo first."
+    assert payload["pending_actions"] == []
+    assert payload["state"] == "ready"
+
+
 def test_chat_endpoint_returns_fallback_when_groq_key_is_missing(tmp_path):
     db_path = tmp_path / "missing-key.db"
     settings = _settings(db_path)
