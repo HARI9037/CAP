@@ -39,7 +39,7 @@ export function useChat() {
     setSessionId(id);
     setLoading(true);
     try {
-      const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      const BASE_URL = import.meta.env.VITE_API_URL || "https://cap-mvp.onrender.com";
       const res = await fetch(`${BASE_URL}/memory?session_id=${id}`);
       const data = await res.json();
 
