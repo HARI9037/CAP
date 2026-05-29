@@ -44,6 +44,7 @@ class MemoryStore:
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS messages (\n                        message_id TEXT PRIMARY KEY,
+                        id INTEGER,
                         session_id TEXT NOT NULL,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
@@ -52,6 +53,19 @@ class MemoryStore:
                     );
                     """
                 )
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(messages);").fetchall()
+                }
+                if "id" not in columns:
+                    connection.execute("ALTER TABLE messages ADD COLUMN id INTEGER;")
+                    connection.execute(
+                        """
+                        UPDATE messages
+                        SET id = rowid
+                        WHERE id IS NULL;
+                        """
+                    )
                 connection.commit()
 
             if demo_mode:
@@ -104,22 +118,22 @@ class MemoryStore:
             for msg_id, role, content in messages:
                 connection.execute(
                     """
-                    INSERT INTO messages (message_id, session_id, role, content, timestamp)
-                    VALUES (?, ?, ?, ?, ?);
+                    INSERT INTO messages (message_id, id, session_id, role, content, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?);
                     """,
-                    (msg_id, demo_session_id, role, content, now),
+                    (msg_id, None, demo_session_id, role, content, now),
                 )
             connection.commit()
 
-    def create_session(self) -> str:
-        session_id = str(uuid4())
+    def create_session(self, session_id: str | None = None) -> str:
+        session_id = session_id or str(uuid4())
         now = _utc_now_iso()
         with self._lock:
             with self._connect() as connection:
                 connection.execute(
                     """
                     INSERT INTO sessions (session_id, summary, workflow_state, created_at, updated_at)
-                    VALUES (?, '', '{}', ?, ?);
+                    VALUES (?, '', '{"phase": "general_chat", "state": "ready", "pending_actions": []}', ?, ?);
                     """,
                     (session_id, now, now),
                 )
@@ -132,13 +146,14 @@ class MemoryStore:
                     row = connection.execute("SELECT 1 FROM sessions WHERE session_id = ?;", (session_id,)).fetchone()
                     if row:
                         return session_id
+            return self.create_session(session_id=session_id)
         return self.create_session()
 
     def get_session_phase(self, session_id: str) -> str:
         with self._lock:
             with self._connect() as connection:
                 state = self._read_workflow_state(connection, session_id)
-                return state.get("phase", "ready")
+                return state.get("phase", "general_chat")
                 
     def append_message(self, session_id: str, role: str, content: str) -> None:
         message_id = str(uuid4())
@@ -147,8 +162,15 @@ class MemoryStore:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    INSERT INTO messages (message_id, session_id, role, content, timestamp)
-                    VALUES (?, ?, ?, ?, ?);
+                    INSERT INTO messages (message_id, id, session_id, role, content, timestamp)
+                    VALUES (
+                        ?,
+                        (SELECT COALESCE(MAX(id), 0) + 1 FROM messages),
+                        ?,
+                        ?,
+                        ?,
+                        ?
+                    );
                     """,
                     (message_id, session_id, role, content, now),
                 )
@@ -167,7 +189,7 @@ class MemoryStore:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
-                    SELECT role, content, timestamp
+                    SELECT role, content
                     FROM messages
                     WHERE session_id = ?
                     ORDER BY timestamp ASC;
@@ -175,7 +197,7 @@ class MemoryStore:
                     (session_id,),
                 )
                 return [
-                    {"role": row[0], "content": row[1], "timestamp": row[2]}
+                    {"role": row[0], "content": row[1]}
                     for row in cursor.fetchall()
                 ]
 

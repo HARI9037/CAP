@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
-from backend.app.orchestrator.service import process_chat_message
+from app.orchestrator.service import process_chat_message
 
 router = APIRouter(tags=["chat"])
 

@@ -1,6 +1,6 @@
 import textwrap
 from typing import List, Dict, Any
-from backend.app.memory.store import memory_store
+from app.memory.store import memory_store
 
 
 def _summarize_messages(messages: List[Dict[str, Any]]) -> str:
