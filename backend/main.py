@@ -13,7 +13,8 @@ app = FastAPI()
 # ---------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, you can change this to "https://cap-mvp.netlify.app"
+    # In production, you can change this to "https://cap-mvp.netlify.app"
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,6 +24,7 @@ app.add_middleware(
 # 2. DATABASE SETUP
 # ---------------------------------------------------------
 DB_PATH = os.path.join(os.path.dirname(__file__), "sessions.db")
+
 
 def init_db():
     """Initializes the SQLite database structure for persisting session messages."""
@@ -39,14 +41,18 @@ def init_db():
         """)
         conn.commit()
 
+
 init_db()
 
 # ---------------------------------------------------------
 # 3. DATA MODELS
 # ---------------------------------------------------------
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+
 
 class ChatResponse(BaseModel):
     reply: str
@@ -58,9 +64,16 @@ class ChatResponse(BaseModel):
 # 4. API ENDPOINTS
 # ---------------------------------------------------------
 
+
 @app.get("/ping")
 async def ping_check():
     """Health check endpoint renamed to /ping to bypass adblockers on the frontend."""
+    return {"status": "ok", "healthy": True}
+
+
+@app.get("/health")
+async def health_check():
+    """Legacy endpoint kept strictly to satisfy Render's internal dashboard health monitor."""
     return {"status": "ok", "healthy": True}
 
 
@@ -69,7 +82,7 @@ async def chat_endpoint(req: ChatRequest):
     # Determine the session ID
     current_session = req.session_id if req.session_id else str(uuid.uuid4())
     user_text = req.message.strip()
-    
+
     if not user_text:
         raise HTTPException(status_code=400, detail="Message context empty")
 
@@ -86,16 +99,16 @@ async def chat_endpoint(req: ChatRequest):
     # STEP B: 🧠 YOUR ACTUAL AI LOGIC GOES HERE 🧠
     # =====================================================================
     # Replace the code below with your actual API calls (OpenAI, Gemini, etc.)
-    # Example: 
+    # Example:
     # response = openai.ChatCompletion.create(messages=your_history, model="gpt-4")
     # ai_reply = response.choices[0].message.content
-    
+
     # -> For now, I am making it echo a slightly smarter response so you know it works:
     if "hello" in user_text.lower() or "hi" in user_text.lower():
         ai_reply = "Hello! I am CAP, your Context-Aware Partner. My database is connected, but my LLM brain needs to be wired up by you!"
     else:
         ai_reply = f"You just said: '{user_text}'. (Replace this block in main.py with your LLM integration)."
-    
+
     mock_state = {"current_node": "active", "status": "LLM not connected yet"}
     mock_actions = []
     # =====================================================================
@@ -129,11 +142,13 @@ async def get_session_memory(session_id: str = Query(..., description="The uniqu
                 (session_id,)
             )
             rows = cursor.fetchall()
-            
-            history = [{"role": row["role"], "content": row["content"]} for row in rows]
+
+            history = [{"role": row["role"], "content": row["content"]}
+                       for row in rows]
             return {"status": "success", "history": history}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database extraction failure: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Database extraction failure: {str(e)}")
 
 
 @app.delete("/memory")
@@ -142,8 +157,10 @@ async def delete_session_memory(session_id: str = Query(..., description="Sessio
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            cursor.execute(
+                "DELETE FROM messages WHERE session_id = ?", (session_id,))
             conn.commit()
             return {"status": "success", "message": f"Session {session_id} successfully wiped."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to clear session indices: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear session indices: {str(e)}")
