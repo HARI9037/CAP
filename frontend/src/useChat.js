@@ -7,92 +7,118 @@ export function useChat() {
   const [sessionId, setSessionId] = useState(null);
   const [chatState, setChatState] = useState(null);
   const [pendingActions, setPendingActions] = useState([]);
-  const [healthStatus, setHealthStatus] = useState("loading");
+  const [healthStatus, setHealthStatus] = useState("unavailable");
 
-  // 1. Properly handles backend health checking with an exact string state match
+  // Read initialized sessions straight out of localStorage on boot
+  const [sessions, setSessions] = useState(() => {
+    const saved = localStorage.getItem("cap_sessions");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // PRIORITY 2 FIX: Real-time active health checking against backend
   useEffect(() => {
-    getHealth()
-      .then((res) => {
-        if (res && res.status === "ready") {
+    const checkHealth = async () => {
+      try {
+        const data = await getHealth();
+        if (data) {
           setHealthStatus("ready");
         } else {
-          setHealthStatus("error");
+          setHealthStatus("unavailable");
         }
-      })
-      .catch(() => setHealthStatus("error"));
+      } catch (err) {
+        setHealthStatus("unavailable");
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 10000); // Poll engine status every 10 seconds
+    return () => clearInterval(interval);
   }, []);
 
-  const send = async (text) => {
-    if (!text.trim()) return;
-
+  // PRIORITY 1 FIX: Retrieve explicit message history context from memory endpoint
+  const loadSession = async (id) => {
+    if (!id) return;
+    setSessionId(id);
     setLoading(true);
-
-    // Optimistically update UI with user message immediately
-    const userMsg = { role: "user", content: text };
-    setMessages((p) => [...p, userMsg]);
-
-    // 2. The Critical Safety Net: Robust Try-Catch Block
     try {
-      const resp = await sendMessage(text, sessionId);
+      const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      const res = await fetch(`${BASE_URL}/memory?session_id=${id}`);
+      const data = await res.json();
 
-      // Prevent undefined object runtime crashes if the network drops or server delays
-      if (resp) {
-        if (resp.session_id) setSessionId(resp.session_id);
-
-        setChatState(resp.state || null);
-        setPendingActions(Array.isArray(resp.pending_actions) ? resp.pending_actions : []);
-
-        // Safely map dynamic assistant field variations from backend route layers
-        const botMsg = {
-          role: "assistant",
-          content: resp.reply || resp.response || "No response content received."
-        };
-        setMessages((p) => [...p, botMsg]);
+      if (Array.isArray(data)) {
+        setMessages(data);
+      } else if (data && Array.isArray(data.messages)) {
+        setMessages(data.messages);
       } else {
-        throw new Error("Empty response object received from backend infrastructure");
+        setMessages([]);
       }
-
-    } catch (error) {
-      console.error("CAP Integration Boundary Error:", error);
-
-      // Fallback message to prevent frontend UI freezes during Render Cold Starts
-      const errorMsg = {
-        role: "assistant",
-        content: "🚨 Connection to CAP timed out! The backend server might be waking up from a sleep cycle (Render Cold Start). Please wait a moment and try again."
-      };
-      setMessages((p) => [...p, errorMsg]);
+    } catch (err) {
+      console.error("Failed to recover session log framework:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // 3. Handle Confirmation for pending actions to the backend
-  const handleConfirm = async (actionId, actionType, approved) => {
-    try {
-      // NOTE: Ensure your backend URL is correct for your deployed environment
-      const response = await fetch("http://localhost:8000/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action_id: actionId,
-          action_type: actionType,
-          approved: approved,
-          session_id: sessionId
-        })
-      });
-      const res = await response.json();
+  const send = async (text) => {
+    if (!text.trim()) return;
+    setLoading(true);
 
-      if (res.ok) {
-        // Remove the action from the local queue optimistically
-        setPendingActions((prev) => prev.filter(a => a.action_id !== actionId));
-        
-        // If that was the last action, set state back to ready
-        if (pendingActions.length <= 1) {
-          setChatState("ready");
-        }
+    const userMsg = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const response = await sendMessage(text, sessionId);
+
+      let currentId = sessionId;
+      if (response.session_id) {
+        currentId = response.session_id;
+        setSessionId(response.session_id);
       }
+
+      // PRIORITY 1 FIX: If this is the initial interaction string, record manifest data
+      if (!sessionId && currentId) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const formattedTime = `Today, ${timeString}`;
+
+        const newSession = {
+          id: currentId,
+          title: text.length > 28 ? text.substring(0, 28) + "..." : text,
+          time: formattedTime,
+        };
+
+        setSessions((prev) => {
+          const updated = [newSession, ...prev];
+          localStorage.setItem("cap_sessions", JSON.stringify(updated));
+          return updated;
+        });
+      }
+
+      if (response.state) {
+        setChatState(response.state);
+      } else {
+        setChatState(null);
+      }
+
+      if (Array.isArray(response.pending_actions)) {
+        setPendingActions(response.pending_actions);
+      } else {
+        setPendingActions([]);
+      }
+
+      const botMsg = {
+        role: "assistant",
+        content: response.reply || response.error || "No response",
+      };
+      setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
-      console.error("Confirmation failed:", error);
+      console.error("Error during dispatch execution loop:", error);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Error: Terminated handshake connection with backend." },
+      ]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -107,11 +133,12 @@ export function useChat() {
     messages,
     send,
     loading,
-    sessionId,
     chatState,
     pendingActions,
+    sessionId,
     resetSession,
     healthStatus,
-    handleConfirm
+    sessions,
+    loadSession,
   };
 }
