@@ -283,6 +283,78 @@ def test_chat_endpoint_keeps_explicit_pending_queue_actions(
     assert _workflow_state(db_path, "explicit-queue-session")["pending_actions"] == actions
 
 
+def test_chat_endpoint_completes_cut_off_reply_with_pending_actions(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "cutoff-reply.db"
+    calls = []
+    actions = [
+        {
+            "action_id": "plan-1",
+            "action_type": "update",
+            "description": "Dashboard: displaying tasks and projects.",
+            "payload": {
+                "target_resource": "project planning queue",
+                "content": "Dashboard: displaying tasks and projects.",
+            },
+        },
+        {
+            "action_id": "plan-2",
+            "action_type": "update",
+            "description": "Authentication: for user sign-up and login.",
+            "payload": {
+                "target_resource": "project planning queue",
+                "content": "Authentication: for user sign-up and login.",
+            },
+        },
+    ]
+    full_reply = (
+        "Based on our current requirements, I've determined an MVP approach with the following components:\n\n"
+        "1. Dashboard: displaying tasks and projects.\n"
+        "2. Authentication: for user sign-up and login.\n"
+        "3. Task Form: for creating and editing tasks.\n\n"
+        "Below are the components I recommend prioritizing first, starting with the dashboard and auth flow."
+    )
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": "Based on our current requirements, I've determined an MVP approach with the following components:\n\n1. Dashboard: displaying tasks and projects.\n1. Authentication: for user sign-up and login.\n1. Task Form: for creating and editing tasks.\n\nBelow are the",
+                    "pending_actions": actions,
+                }
+            )
+        return json.dumps({"reply": full_reply, "pending_actions": actions})
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": (
+                    "I am starting a new web app project using React and Tailwind. "
+                    "My goal is to build a project management dashboard. Please "
+                    "initialize the structure, identify the first three priority "
+                    "components I should build, and place them in the pending "
+                    "actions queue for my approval."
+                ),
+                "session_id": "cutoff-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert payload["state"] == "awaiting_confirmation"
+    assert payload["pending_actions"] == actions
+    assert "Below are the components" in payload["reply"]
+    assert payload["reply"].endswith("auth flow.")
+
+
 def test_chat_endpoint_retries_missing_explicit_queue_actions(
     tmp_path,
     monkeypatch,

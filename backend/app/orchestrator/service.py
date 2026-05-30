@@ -315,6 +315,21 @@ def _reply_is_too_thin_for_content(reply: str) -> bool:
     return len(lines) <= 2 and not re.search(r"(^|\n)\s*([-*]|\d+\.)\s+", normalized)
 
 
+def _reply_looks_truncated(reply: str) -> bool:
+    normalized = reply.strip()
+    if not normalized:
+        return True
+    if normalized[-1] in ".!?)]}":
+        return False
+
+    trailing_fragment = normalized.lower()
+    if re.search(r"\b(the|and|to|of|with|for|a|an|in|on|at|by|from)\s*$", trailing_fragment):
+        return True
+    if re.search(r"[,:;]\s*$", normalized):
+        return True
+    return False
+
+
 def _extract_action_content(value: object) -> str | None:
     if isinstance(value, str):
         cleaned = _clean_reply_text(value)
@@ -370,6 +385,13 @@ def _needs_content_retry(message: str, llm_response: LLMResponse) -> bool:
     )
 
 
+def _needs_reply_completion_retry(message: str, llm_response: LLMResponse) -> bool:
+    return (
+        (_looks_like_content_request(message) or _explicitly_requests_pending_queue(message))
+        and _reply_looks_truncated(llm_response.reply)
+    )
+
+
 def _build_content_retry_history(
     session_history: list[dict],
     message: str,
@@ -386,6 +408,39 @@ def _build_content_retry_history(
     return [
         *session_history,
         {"role": "assistant", "content": short_reply},
+        {"role": "user", "content": retry_prompt},
+    ]
+
+
+def _build_reply_completion_history(
+    session_history: list[dict],
+    message: str,
+    reply: str,
+    pending_actions: list[PendingAction],
+) -> list[dict]:
+    if pending_actions:
+        pending_description = "\n".join(
+            f"- {action.description}" for action in pending_actions
+        )
+        retry_prompt = (
+            "Your previous reply was cut off. Return the same JSON object with "
+            "a complete, polished reply in the reply field. Keep the pending "
+            "actions you already proposed. Do not shorten the explanation.\n\n"
+            f"Original user request: {message}\n\n"
+            f"Current reply draft:\n{reply}\n\n"
+            f"Current pending actions:\n{pending_description}"
+        )
+    else:
+        retry_prompt = (
+            "Your previous reply was cut off. Return the same JSON object with "
+            "a complete, polished reply in the reply field. Do not shorten the "
+            "explanation.\n\n"
+            f"Original user request: {message}\n\n"
+            f"Current reply draft:\n{reply}"
+        )
+    return [
+        *session_history,
+        {"role": "assistant", "content": reply},
         {"role": "user", "content": retry_prompt},
     ]
 
@@ -595,6 +650,34 @@ def process_chat_message(
                     reply=llm_response.reply,
                     pending_actions=synthesized_actions,
                 )
+
+    if _needs_reply_completion_retry(message, llm_response):
+        try:
+            completion_raw_response = _call_groq_api(
+                session_history=_build_reply_completion_history(
+                    session_history,
+                    message,
+                    llm_response.reply,
+                    llm_response.pending_actions,
+                ),
+                current_phase=current_phase,
+                settings=settings,
+            )
+            completion_response = _parse_llm_response(completion_raw_response)
+            completion_response = _repair_content_generation_response(
+                message,
+                completion_response,
+            )
+            if _reply_has_more_content(completion_response.reply, llm_response.reply):
+                llm_response = LLMResponse(
+                    reply=completion_response.reply,
+                    pending_actions=(
+                        completion_response.pending_actions
+                        or llm_response.pending_actions
+                    ),
+                )
+        except Exception:
+            logger.exception("Reply completion retry failed; using initial response.")
 
     if _needs_content_retry(message, llm_response):
         try:
