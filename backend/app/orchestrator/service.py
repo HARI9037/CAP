@@ -17,6 +17,18 @@ SPEC_PATH = Path(__file__).resolve(
 TIMEOUT_FALLBACK_REPLY = (
     "I'm experiencing a slight network delay on the backend. Could you try sending that again?"
 )
+ACTION_TYPE_ALIASES = {
+    "create": "write",
+    "create_file": "write",
+    "create-note": "write",
+    "create_note": "write",
+    "edit": "update",
+    "modify": "update",
+    "save-note": "save",
+    "save_note": "save",
+    "write_file": "write",
+    "write-file": "write",
+}
 MUTATING_ACTION_TYPES = {"write", "update", "organize", "save", "delete"}
 PARSE_FALLBACK_REPLY = (
     "I received an empty response from the model. Could you try sending that again?"
@@ -335,8 +347,13 @@ def read_memory_summary(session_id: str | None = None) -> dict:
     return memory_store.get_session_summary(session_id=session_id)
 
 
+def normalize_action_type(action_type: str) -> str:
+    normalized = action_type.strip().lower().replace(" ", "_")
+    return ACTION_TYPE_ALIASES.get(normalized, normalized)
+
+
 def requires_confirmation(action_type: str) -> bool:
-    return action_type.strip().lower() in MUTATING_ACTION_TYPES
+    return normalize_action_type(action_type) in MUTATING_ACTION_TYPES
 
 
 def handle_confirmation(
@@ -345,7 +362,12 @@ def handle_confirmation(
     approved: bool,
     session_id: str,
 ) -> dict:
-    if not requires_confirmation(action_type):
+    matching_action, updated_pending_actions = memory_store.resolve_pending_action(
+        session_id,
+        action_id,
+    )
+
+    if matching_action is None and not requires_confirmation(action_type):
         return {
             "ok": True,
             "action_id": action_id,
@@ -355,11 +377,6 @@ def handle_confirmation(
             "remaining_actions": memory_store.get_pending_actions(session_id),
             "memory_summary": memory_store.get_session_summary(session_id),
         }
-
-    matching_action, updated_pending_actions = memory_store.resolve_pending_action(
-        session_id,
-        action_id,
-    )
 
     if matching_action is None:
         return {
@@ -375,7 +392,9 @@ def handle_confirmation(
     execution_result = None
     if approved:
         action_payload = matching_action.get("payload", {})
-        resolved_action_type = matching_action.get("action_type") or action_type
+        resolved_action_type = normalize_action_type(
+            matching_action.get("action_type") or action_type
+        )
         try:
             tool_result = execute_tool(
                 resolved_action_type, action_id, action_payload)

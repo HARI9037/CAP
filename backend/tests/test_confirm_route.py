@@ -93,3 +93,65 @@ def test_confirm_not_required_returns_standard_response_shape(tmp_path):
     assert payload["execution_result"] is None
     assert payload["remaining_actions"] == [pending_action]
     assert payload["memory_summary"]["session_id"] == "read-session"
+
+
+def test_confirm_alias_action_type_resolves_pending_action(tmp_path):
+    app = create_app(settings=_settings(tmp_path / "alias-confirm.db"))
+    action = {
+        "action_id": "create-1",
+        "action_type": "create_note",
+        "description": "Create a note from this session.",
+        "payload": {
+            "title": "Aliased Note",
+            "content": "Alias action types should still execute.",
+        },
+    }
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("alias-session")
+        memory_store.store_pending_actions("alias-session", [action])
+        response = client.post(
+            "/confirm",
+            json={
+                "action_id": "create-1",
+                "action_type": "create_note",
+                "approved": True,
+                "session_id": "alias-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "approved"
+    assert payload["remaining_actions"] == []
+    assert "Action executed" in payload["execution_result"]
+    assert "Aliased Note" in payload["memory_summary"]["summary"]
+
+
+def test_confirm_pending_read_like_action_still_resolves(tmp_path):
+    app = create_app(settings=_settings(tmp_path / "pending-read.db"))
+    action = {
+        "action_id": "custom-1",
+        "action_type": "custom_review",
+        "description": "Review a session note.",
+        "payload": {"target_resource": "session note"},
+    }
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("custom-session")
+        memory_store.store_pending_actions("custom-session", [action])
+        response = client.post(
+            "/confirm",
+            json={
+                "action_id": "custom-1",
+                "action_type": "custom_review",
+                "approved": True,
+                "session_id": "custom-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "approved"
+    assert payload["remaining_actions"] == []
+    assert "Action executed" in payload["execution_result"]

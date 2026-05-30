@@ -1,7 +1,6 @@
 """
-CAP Tool Executor - Priority 2 implementation.
-Implements the 'save' and 'write' action types as a session note tool.
-All other action types return a safe informational result.
+CAP Tool Executor.
+Implements safe, deployment-friendly handlers for approved CAP actions.
 """
 from __future__ import annotations
 
@@ -34,19 +33,32 @@ def execute_save_note(action_id: str, payload: dict) -> dict:
     }
 
 
+def execute_acknowledgement(action_type: str, payload: dict) -> dict:
+    target = payload.get("title") or payload.get("target_resource") or "session"
+    messages = {
+        "update": f"Update for '{target}' recorded in session.",
+        "organize": f"Organization request for '{target}' recorded in session.",
+        "delete": f"Delete request for '{target}' recorded without destructive side effects.",
+    }
+    return {
+        "success": True,
+        "message": messages.get(
+            action_type,
+            f"Action '{action_type}' acknowledged. Execution noted in session.",
+        ),
+        "data": {},
+    }
+
+
 def execute_tool(action_type: str, action_id: str, payload: dict) -> dict:
     """
     Dispatch an approved action to the correct tool handler.
-    Only 'save' and 'write' trigger real execution; all others return
-    a safe 'acknowledged' response so the workflow never crashes.
+    Only 'save' and 'write' create session notes; all others return
+    a safe acknowledgement so the workflow never crashes or mutates external state.
     """
     action_type_lower = action_type.strip().lower()
 
     if action_type_lower in ("save", "write"):
         return execute_save_note(action_id, payload)
 
-    return {
-        "success": True,
-        "message": f"Action '{action_type}' acknowledged. Execution noted in session.",
-        "data": {},
-    }
+    return execute_acknowledgement(action_type_lower, payload)
