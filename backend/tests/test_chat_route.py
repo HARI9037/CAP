@@ -172,6 +172,113 @@ def test_chat_endpoint_surfaces_roadmap_payload_in_chat(
     assert _workflow_state(db_path, "roadmap-session")["pending_actions"] == []
 
 
+def test_chat_endpoint_suppresses_unrequested_update_actions(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "unrequested-updates.db"
+    actions = [
+        {
+            "action_id": "schema-1",
+            "action_type": "update",
+            "description": "Define the database schema for attendance tracking.",
+            "payload": {"target_resource": "session", "parameters": {}},
+        },
+        {
+            "action_id": "realtime-1",
+            "action_type": "update",
+            "description": "Explore real-time attendance tracking options.",
+            "payload": {"target_resource": "session", "parameters": {}},
+        },
+    ]
+
+    def fake_groq_call(session_history, current_phase, settings):
+        return json.dumps(
+            {
+                "reply": (
+                    "That's an exciting project. Consider real-time attendance "
+                    "tracking, automatic record keeping, and analytics."
+                ),
+                "pending_actions": actions,
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": "I want to build a webapp for tracking attendance.",
+                "session_id": "feature-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["pending_actions"] == []
+    assert payload["state"] == "ready"
+    assert _workflow_state(db_path, "feature-session")["pending_actions"] == []
+
+
+def test_chat_endpoint_retries_thin_techstack_reply(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "techstack-retry.db"
+    calls = []
+    full_reply = (
+        "For a beginner-friendly attendance dashboard, use React with Vite "
+        "for the frontend, FastAPI for the backend, PostgreSQL for data, "
+        "JWT auth for teacher logins, and Vercel plus Render for deployment.\n\n"
+        "1. React + Vite: simple component development and quick builds.\n"
+        "2. FastAPI: clean API structure and automatic validation.\n"
+        "3. PostgreSQL: reliable attendance records and reporting queries."
+    )
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": "For your project, I recommend the following tech stack:",
+                    "pending_actions": [
+                        {
+                            "action_id": "techstack-1",
+                            "action_type": "update",
+                            "description": "Update the session with a tech stack.",
+                            "payload": {"target_resource": "session"},
+                        }
+                    ],
+                }
+            )
+        return json.dumps({"reply": full_reply, "pending_actions": []})
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": (
+                    "I'm a complete beginner. Give me a detailed techstack "
+                    "list and why you choose that."
+                ),
+                "session_id": "techstack-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert payload["reply"] == full_reply
+    assert payload["pending_actions"] == []
+    assert payload["state"] == "ready"
+
+
 def test_chat_endpoint_respects_architecture_review_phase(tmp_path, monkeypatch):
     db_path = tmp_path / "architecture-review.db"
 

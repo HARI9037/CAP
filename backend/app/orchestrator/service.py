@@ -36,26 +36,36 @@ PARSE_FALLBACK_REPLY = (
 logger = logging.getLogger(__name__)
 TEXT_RESPONSE_KEYS = ("reply", "message", "content", "response", "text")
 CONTENT_REQUEST_KEYWORDS = (
+    "architecture",
     "checklist",
     "compare",
     "comparison",
+    "dashboard",
+    "detail",
+    "detailed",
     "explain",
+    "feature",
+    "features",
     "guide",
+    "recommend",
+    "recommendation",
     "plan",
     "road map",
     "roadmap",
     "steps",
+    "tech-stack",
     "tech stack",
+    "techstack",
+    "web app",
+    "webapp",
     "workflow",
 )
-STATE_CHANGING_KEYWORDS = (
-    "delete",
-    "modify",
-    "organize",
-    "remember",
-    "save",
-    "store",
-    "update",
+STATE_CHANGING_PATTERNS = (
+    r"\b(save|remember|store)\b",
+    r"\b(delete|remove)\b",
+    r"\borganize\b",
+    r"\b(update|modify|edit|change)\b.*\b(existing|saved|stored|memory|session|note|file|document|resource|diagram)\b",
+    r"\b(add|append)\b.*\b(to|into)\b.*\b(memory|session|note|file|document|resource)\b",
 )
 ACTION_CONTENT_KEYS = (
     "content",
@@ -267,7 +277,7 @@ def _looks_like_content_request(message: str) -> bool:
 
 def _looks_state_changing(message: str) -> bool:
     lowered = message.lower()
-    return any(keyword in lowered for keyword in STATE_CHANGING_KEYWORDS)
+    return any(re.search(pattern, lowered) for pattern in STATE_CHANGING_PATTERNS)
 
 
 def _reply_is_too_thin_for_content(reply: str) -> bool:
@@ -288,6 +298,8 @@ def _extract_action_content(value: object) -> str | None:
             if extracted:
                 return extracted
         for nested_value in value.values():
+            if not isinstance(nested_value, (dict, list)):
+                continue
             extracted = _extract_action_content(nested_value)
             if extracted:
                 return extracted
@@ -307,13 +319,11 @@ def _repair_content_generation_response(
     llm_response: LLMResponse,
 ) -> LLMResponse:
     """
-    Some models treat "write me a roadmap" as a mutating action and put the
-    useful answer in an action payload. For pure chat content requests, surface
-    that content in the visible reply instead of hiding it behind approval.
+    Some models over-apply the approval protocol and turn ordinary chat advice
+    into update actions. Unless the user clearly requested a state change,
+    keep the interaction as visible chat content.
     """
-    if not _looks_like_content_request(message) or _looks_state_changing(message):
-        return llm_response
-    if not llm_response.pending_actions:
+    if _looks_state_changing(message) or not llm_response.pending_actions:
         return llm_response
 
     for action in llm_response.pending_actions:
@@ -321,7 +331,46 @@ def _repair_content_generation_response(
         if extracted and (len(extracted) > len(llm_response.reply) or _reply_is_too_thin_for_content(llm_response.reply)):
             return LLMResponse(reply=extracted, pending_actions=[])
 
-    return llm_response
+    return LLMResponse(reply=llm_response.reply, pending_actions=[])
+
+
+def _needs_content_retry(message: str, llm_response: LLMResponse) -> bool:
+    if _looks_state_changing(message):
+        return False
+    return (
+        _looks_like_content_request(message)
+        and _reply_is_too_thin_for_content(llm_response.reply)
+    )
+
+
+def _build_content_retry_history(
+    session_history: list[dict],
+    message: str,
+    short_reply: str,
+) -> list[dict]:
+    retry_prompt = (
+        "Your previous answer was incomplete for a normal chat request. "
+        "Answer the original request completely in the JSON reply field, "
+        "with concrete details and no pending_actions. Do not create update, "
+        "save, or organize actions unless the user explicitly asked to change "
+        "stored state.\n\n"
+        f"Original user request: {message}"
+    )
+    return [
+        *session_history,
+        {"role": "assistant", "content": short_reply},
+        {"role": "user", "content": retry_prompt},
+    ]
+
+
+def _reply_has_more_content(candidate: str, current: str) -> bool:
+    candidate_text = candidate.strip()
+    current_text = current.strip()
+    if len(candidate_text) >= max(140, len(current_text) + 80):
+        return True
+    candidate_items = len(re.findall(r"(^|\n)\s*([-*]|\d+\.)\s+", candidate_text))
+    current_items = len(re.findall(r"(^|\n)\s*([-*]|\d+\.)\s+", current_text))
+    return candidate_items >= 3 and candidate_items > current_items
 
 
 def _build_fallback_result(
@@ -412,6 +461,30 @@ def process_chat_message(
         )
 
     llm_response = _repair_content_generation_response(message, llm_response)
+    if _needs_content_retry(message, llm_response):
+        try:
+            retry_raw_response = _call_groq_api(
+                session_history=_build_content_retry_history(
+                    session_history,
+                    message,
+                    llm_response.reply,
+                ),
+                current_phase=current_phase,
+                settings=settings,
+            )
+            retry_response = _parse_llm_response(retry_raw_response)
+            retry_response = _repair_content_generation_response(
+                message,
+                retry_response,
+            )
+            if _reply_has_more_content(retry_response.reply, llm_response.reply):
+                llm_response = LLMResponse(
+                    reply=retry_response.reply,
+                    pending_actions=[],
+                )
+        except Exception:
+            logger.exception("Content retry failed; using initial response.")
+
     pending_actions = [action.model_dump()
                        for action in llm_response.pending_actions]
     memory_store.append_message(
@@ -488,6 +561,7 @@ def handle_confirmation(
             "memory_summary": memory_store.get_session_summary(session_id),
         }
 
+    action_description = matching_action.get("description")
     execution_result = None
     if approved:
         action_payload = matching_action.get("payload", {})
@@ -507,12 +581,25 @@ def handle_confirmation(
                         tool_result["data"]["note"],
                     )
                     execution_result += f"\n\n{tool_result['data']['note']}"
+                else:
+                    visible_payload_content = _extract_action_content(
+                        action_payload)
+                    if visible_payload_content:
+                        execution_result += f"\n\n{visible_payload_content}"
+                    elif action_description:
+                        execution_result += f"\n\n{action_description}"
             else:
                 execution_result = "\u26a0 Action could not be completed at this time."
         except Exception:
             logger.exception(
                 "Tool execution failed for action_id=%s", action_id)
             execution_result = "\u26a0 Action failed. Session context is preserved."
+    else:
+        execution_result = (
+            f"Action rejected: {action_description}"
+            if action_description
+            else "Action rejected. No changes were applied."
+        )
 
     return {
         "ok": True,

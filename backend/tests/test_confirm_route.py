@@ -128,6 +128,66 @@ def test_confirm_alias_action_type_resolves_pending_action(tmp_path):
     assert "Aliased Note" in payload["memory_summary"]["summary"]
 
 
+def test_confirm_approved_update_returns_visible_description(tmp_path):
+    app = create_app(settings=_settings(tmp_path / "visible-update.db"))
+    action = {
+        "action_id": "update-1",
+        "action_type": "update",
+        "description": "Define the database schema for attendance tracking.",
+        "payload": {"target_resource": "session", "parameters": {}},
+    }
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("visible-update-session")
+        memory_store.store_pending_actions("visible-update-session", [action])
+        response = client.post(
+            "/confirm",
+            json={
+                "action_id": "update-1",
+                "action_type": "update",
+                "approved": True,
+                "session_id": "visible-update-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "approved"
+    assert payload["remaining_actions"] == []
+    assert "Action executed" in payload["execution_result"]
+    assert "Define the database schema" in payload["execution_result"]
+
+
+def test_confirm_rejection_returns_visible_result(tmp_path):
+    app = create_app(settings=_settings(tmp_path / "visible-reject.db"))
+    action = {
+        "action_id": "reject-1",
+        "action_type": "update",
+        "description": "Explore real-time attendance tracking options.",
+        "payload": {"target_resource": "session", "parameters": {}},
+    }
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("visible-reject-session")
+        memory_store.store_pending_actions("visible-reject-session", [action])
+        response = client.post(
+            "/confirm",
+            json={
+                "action_id": "reject-1",
+                "action_type": "update",
+                "approved": False,
+                "session_id": "visible-reject-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "rejected"
+    assert payload["remaining_actions"] == []
+    assert "Action rejected" in payload["execution_result"]
+    assert "real-time attendance" in payload["execution_result"]
+
+
 def test_confirm_pending_read_like_action_still_resolves(tmp_path):
     app = create_app(settings=_settings(tmp_path / "pending-read.db"))
     action = {
