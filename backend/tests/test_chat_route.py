@@ -223,6 +223,220 @@ def test_chat_endpoint_suppresses_unrequested_update_actions(
     assert _workflow_state(db_path, "feature-session")["pending_actions"] == []
 
 
+def test_chat_endpoint_keeps_explicit_pending_queue_actions(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "explicit-queue.db"
+    actions = [
+        {
+            "action_id": "component-1",
+            "action_type": "update",
+            "description": "Build the NavigationHeader component.",
+            "payload": {
+                "target_resource": "project planning queue",
+                "content": "Build the NavigationHeader component.",
+            },
+        },
+        {
+            "action_id": "component-2",
+            "action_type": "update",
+            "description": "Build the DashboardPage component.",
+            "payload": {
+                "target_resource": "project planning queue",
+                "content": "Build the DashboardPage component.",
+            },
+        },
+    ]
+
+    def fake_groq_call(session_history, current_phase, settings):
+        return json.dumps(
+            {
+                "reply": (
+                    "Start with NavigationHeader, DashboardPage, and ProjectCard. "
+                    "I queued the first two components for approval."
+                ),
+                "pending_actions": actions,
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": (
+                    "Initialize the structure, identify the first three priority "
+                    "components, and place them in the pending actions queue "
+                    "for my approval."
+                ),
+                "session_id": "explicit-queue-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["state"] == "awaiting_confirmation"
+    assert payload["pending_actions"] == actions
+    assert _workflow_state(db_path, "explicit-queue-session")["pending_actions"] == actions
+
+
+def test_chat_endpoint_retries_missing_explicit_queue_actions(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "queue-retry.db"
+    calls = []
+    actions = [
+        {
+            "action_id": "auth-1",
+            "action_type": "update",
+            "description": "Define authentication goals and requirements.",
+            "payload": {
+                "target_resource": "approval queue",
+                "content": "Define authentication goals and requirements.",
+            },
+        },
+        {
+            "action_id": "auth-2",
+            "action_type": "update",
+            "description": "Choose the authentication method.",
+            "payload": {
+                "target_resource": "approval queue",
+                "content": "Choose the authentication method.",
+            },
+        },
+    ]
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": (
+                        "Define authentication goals and requirements\n"
+                        "Choose authentication method\n"
+                        "Implement authentication API"
+                    ),
+                    "pending_actions": [],
+                }
+            )
+        return json.dumps(
+            {
+                "reply": "I placed the authentication plan into the approval queue.",
+                "pending_actions": actions,
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": (
+                    "Generate the authentication modules as a plan but do not "
+                    "execute anything until I explicitly approve each action."
+                ),
+                "session_id": "queue-retry-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert payload["state"] == "awaiting_confirmation"
+    assert payload["pending_actions"] == actions
+    assert "Implement authentication API" in payload["reply"]
+
+
+def test_chat_endpoint_synthesizes_queue_when_model_omits_actions(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "queue-synthesize.db"
+    calls = []
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": (
+                        "1. Define authentication goals and requirements\n"
+                        "2. Choose authentication method\n"
+                        "3. Implement authentication API"
+                    ),
+                    "pending_actions": [],
+                }
+            )
+        raise httpx.TimeoutException("retry timed out")
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": (
+                    "Generate the authentication modules as a plan but do not "
+                    "execute anything until I explicitly approve each action."
+                ),
+                "session_id": "queue-synthesize-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert payload["state"] == "awaiting_confirmation"
+    assert len(payload["pending_actions"]) == 3
+    assert payload["pending_actions"][0]["action_type"] == "update"
+    assert "Define authentication goals" in payload["pending_actions"][0]["description"]
+
+
+def test_chat_endpoint_synthesizes_save_memory_action(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "save-memory-synthesize.db"
+    calls = []
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": "React was replaced with Vue for the dashboard plan.",
+                    "pending_actions": [],
+                }
+            )
+        raise httpx.TimeoutException("retry timed out")
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": "savethis, in your memory",
+                "session_id": "save-memory-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["state"] == "awaiting_confirmation"
+    assert len(payload["pending_actions"]) == 1
+    assert payload["pending_actions"][0]["action_type"] == "save"
+    assert "React was replaced with Vue" in payload["pending_actions"][0]["description"]
+
+
 def test_chat_endpoint_retries_thin_techstack_reply(
     tmp_path,
     monkeypatch,

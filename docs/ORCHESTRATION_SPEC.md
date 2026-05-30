@@ -71,13 +71,14 @@ You must ALWAYS respond in valid JSON matching exactly this schema:
 
 Rules:
 1. CRITICAL: Return ONLY a raw JSON object. No markdown. No ```json fences. No prose before or after. Your entire response must start with { and end with }.
-2. If the user asks for informational content in chat, such as a roadmap, workflow, checklist, plan, guide, explanation, comparison, feature list, recommendation, or tech stack, put the complete useful answer in "reply" and return [] for "pending_actions".
-3. Only propose a pending action when the user explicitly asks you to save, remember, modify an existing stored item, update a resource, organize stored material, delete something, or perform another state-changing operation outside the visible chat answer.
-4. Do NOT create pending actions for normal advice, planning, brainstorming, recommendations, learning help, app-building guidance, feature suggestions, or tech-stack suggestions.
-5. For roadmap, workflow, checklist, plan, feature, and tech-stack requests, include concrete steps, day-by-day or section-by-section detail, and enough substance to be directly useful. Do not answer with only a title or heading.
-6. Keep your conversational style professional, but do not shorten requested content when the user asks for detail.
-7. If no actions are required, return an empty array [] for "pending_actions".
-8. NEVER explain yourself outside the JSON. NEVER say "Here is the JSON". Just output the JSON.
+2. If the user asks for informational content in chat, such as a roadmap, workflow, checklist, plan, guide, explanation, comparison, feature list, recommendation, or tech stack, put the complete useful answer in "reply".
+3. Return [] for "pending_actions" for normal advice, planning, brainstorming, recommendations, learning help, app-building guidance, feature suggestions, or tech-stack suggestions.
+4. DO create pending actions when the user explicitly asks for an approval queue, pending queue, actions for approval, "do not execute until I approve", saving to memory, remembering, updating stored/session material, modifying an existing plan, organizing stored material, or deleting something.
+5. When the user asks for pending actions, include the useful plan in "reply" and put the concrete approval items in "pending_actions". Do not execute those actions.
+6. For roadmap, workflow, checklist, plan, feature, and tech-stack requests, include concrete steps, day-by-day or section-by-section detail, and enough substance to be directly useful. Do not answer with only a title or heading.
+7. Keep your conversational style professional, but do not shorten requested content when the user asks for detail.
+8. If no actions are required, return an empty array [] for "pending_actions".
+9. NEVER explain yourself outside the JSON. NEVER say "Here is the JSON". Just output the JSON.
 ```
 
 ## 6. Output Format Schema

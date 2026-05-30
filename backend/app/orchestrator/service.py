@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from uuid import uuid4
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from ..context_builder import build_context
@@ -61,11 +62,28 @@ CONTENT_REQUEST_KEYWORDS = (
     "workflow",
 )
 STATE_CHANGING_PATTERNS = (
+    r"\bsave\s*this\b",
+    r"\bsave\s*it\b",
+    r"\bsavethis\b",
     r"\b(save|remember|store)\b",
+    r"\bin\s+your\s+memory\b",
+    r"\b(to|in)\s+memory\b",
     r"\b(delete|remove)\b",
     r"\borganize\b",
     r"\b(update|modify|edit|change)\b.*\b(existing|saved|stored|memory|session|note|file|document|resource|diagram)\b",
     r"\b(add|append)\b.*\b(to|into)\b.*\b(memory|session|note|file|document|resource)\b",
+    r"\b(pivot|switch|replace)\b.*\b(instead of|rather than|from|to)\b",
+)
+PENDING_QUEUE_PATTERNS = (
+    r"\bpending\b",
+    r"\bqueue\b",
+    r"\bapproval\b",
+    r"\bapprove\b",
+    r"\breject\b",
+    r"\bdo\s+not\s+execute\b",
+    r"\bdon't\s+execute\b",
+    r"\buntil\s+i\s+(explicitly\s+)?approve\b",
+    r"\bfor\s+my\s+approval\b",
 )
 ACTION_CONTENT_KEYS = (
     "content",
@@ -280,6 +298,15 @@ def _looks_state_changing(message: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in STATE_CHANGING_PATTERNS)
 
 
+def _explicitly_requests_pending_queue(message: str) -> bool:
+    lowered = message.lower()
+    return any(re.search(pattern, lowered) for pattern in PENDING_QUEUE_PATTERNS)
+
+
+def _should_keep_pending_actions(message: str) -> bool:
+    return _explicitly_requests_pending_queue(message) or _looks_state_changing(message)
+
+
 def _reply_is_too_thin_for_content(reply: str) -> bool:
     normalized = reply.strip()
     if len(normalized) < 90:
@@ -323,7 +350,7 @@ def _repair_content_generation_response(
     into update actions. Unless the user clearly requested a state change,
     keep the interaction as visible chat content.
     """
-    if _looks_state_changing(message) or not llm_response.pending_actions:
+    if _should_keep_pending_actions(message) or not llm_response.pending_actions:
         return llm_response
 
     for action in llm_response.pending_actions:
@@ -335,7 +362,7 @@ def _repair_content_generation_response(
 
 
 def _needs_content_retry(message: str, llm_response: LLMResponse) -> bool:
-    if _looks_state_changing(message):
+    if _should_keep_pending_actions(message):
         return False
     return (
         _looks_like_content_request(message)
@@ -371,6 +398,78 @@ def _reply_has_more_content(candidate: str, current: str) -> bool:
     candidate_items = len(re.findall(r"(^|\n)\s*([-*]|\d+\.)\s+", candidate_text))
     current_items = len(re.findall(r"(^|\n)\s*([-*]|\d+\.)\s+", current_text))
     return candidate_items >= 3 and candidate_items > current_items
+
+
+def _needs_action_retry(message: str, llm_response: LLMResponse) -> bool:
+    return _should_keep_pending_actions(message) and not llm_response.pending_actions
+
+
+def _build_action_retry_history(
+    session_history: list[dict],
+    message: str,
+    reply: str,
+) -> list[dict]:
+    retry_prompt = (
+        "Your previous answer did not include pending_actions, but the user "
+        "explicitly requested an approval queue or a state-changing operation. "
+        "Return a JSON object with a helpful reply and 1 to 5 concrete "
+        "pending_actions. Each pending action must have action_id, action_type, "
+        "description, and payload. Do not execute the actions.\n\n"
+        f"Original user request: {message}"
+    )
+    return [
+        *session_history,
+        {"role": "assistant", "content": reply},
+        {"role": "user", "content": retry_prompt},
+    ]
+
+
+def _strip_list_marker(line: str) -> str:
+    return re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line).strip()
+
+
+def _extract_action_candidates(reply: str) -> list[str]:
+    candidates = []
+    for raw_line in reply.splitlines():
+        line = _strip_list_marker(raw_line)
+        if not line or len(line) < 8:
+            continue
+        if line.endswith(":"):
+            continue
+        if line.lower().startswith(("to start", "here", "structure", "then,")):
+            continue
+        candidates.append(line)
+    return candidates[:5]
+
+
+def _synthesize_pending_actions(message: str, reply: str) -> list[PendingAction]:
+    if not _should_keep_pending_actions(message):
+        return []
+
+    action_type = "save" if re.search(
+        r"\b(save|remember|store|savethis|memory)\b",
+        message.lower(),
+    ) else "update"
+    candidates = _extract_action_candidates(reply)
+    if not candidates and reply.strip():
+        candidates = [reply.strip()]
+
+    actions = []
+    for index, candidate in enumerate(candidates[:5], start=1):
+        actions.append(
+            PendingAction(
+                action_id=f"queued-{uuid4()}",
+                action_type=action_type,
+                description=candidate[:240],
+                payload={
+                    "target_resource": "session",
+                    "content": candidate,
+                    "source": "synthesized_from_reply",
+                    "position": index,
+                },
+            )
+        )
+    return actions
 
 
 def _build_fallback_result(
@@ -461,6 +560,42 @@ def process_chat_message(
         )
 
     llm_response = _repair_content_generation_response(message, llm_response)
+    if _needs_action_retry(message, llm_response):
+        try:
+            retry_raw_response = _call_groq_api(
+                session_history=_build_action_retry_history(
+                    session_history,
+                    message,
+                    llm_response.reply,
+                ),
+                current_phase=current_phase,
+                settings=settings,
+            )
+            retry_response = _parse_llm_response(retry_raw_response)
+            if retry_response.pending_actions:
+                reply = (
+                    retry_response.reply
+                    if _reply_has_more_content(retry_response.reply, llm_response.reply)
+                    else llm_response.reply
+                )
+                llm_response = LLMResponse(
+                    reply=reply,
+                    pending_actions=retry_response.pending_actions,
+                )
+        except Exception:
+            logger.exception("Action retry failed; synthesizing pending actions.")
+
+        if not llm_response.pending_actions:
+            synthesized_actions = _synthesize_pending_actions(
+                message,
+                llm_response.reply,
+            )
+            if synthesized_actions:
+                llm_response = LLMResponse(
+                    reply=llm_response.reply,
+                    pending_actions=synthesized_actions,
+                )
+
     if _needs_content_retry(message, llm_response):
         try:
             retry_raw_response = _call_groq_api(
