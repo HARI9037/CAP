@@ -5,14 +5,17 @@ try:
     from backend.app.memory.store import memory_store
     from backend.app.routes import chat, confirm, health, memory
     from backend.app.utils.env import Settings, initialize_settings
+    from backend.app.utils.logging import configure_logging
 except ModuleNotFoundError:
     from app.memory.store import memory_store
     from app.routes import chat, confirm, health, memory
     from app.utils.env import Settings, initialize_settings
+    from app.utils.logging import configure_logging
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or initialize_settings()
+    configure_logging(settings.log_level)
 
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.state.settings = settings

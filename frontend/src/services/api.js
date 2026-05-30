@@ -38,7 +38,7 @@ export async function getHealth() {
  * Loads memory and history for a prior session.
  */
 export async function getMemory(sessionId) {
-    const res = await fetch(`${BASE_URL}/memory?session_id=${sessionId}`);
+    const res = await fetch(`${BASE_URL}/memory?session_id=${encodeURIComponent(sessionId)}`);
     return readJsonResponse(res);
 }
 
@@ -46,9 +46,26 @@ export async function getMemory(sessionId) {
  * Permanently removes a target session sequence from the backend database indices.
  */
 export async function deleteSession(sessionId) {
-    const res = await fetch(`${BASE_URL}/memory?session_id=${sessionId}`, {
+    const res = await fetch(`${BASE_URL}/memory?session_id=${encodeURIComponent(sessionId)}`, {
         method: "DELETE",
     });
 
+    return readJsonResponse(res);
+}
+
+/**
+ * Approves or rejects a pending action via the CAP confirmation gate.
+ */
+export async function confirmAction(actionId, actionType, approved, sessionId) {
+    const res = await fetch(`${BASE_URL}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            action_id: actionId,
+            action_type: actionType,
+            approved: approved,
+            session_id: sessionId,
+        }),
+    });
     return readJsonResponse(res);
 }

@@ -4,7 +4,7 @@
 
 FastAPI backend for CAP (Context-Aware Partner).
 It handles chat orchestration, SQLite-backed session memory, Groq API calls, health checks, and confirmation state for pending actions.
-Confirmed actions are recorded in memory state only; real tool execution is not implemented yet.
+Confirmed `save` and `write` actions execute the session-note tool and update the session summary. Other mutating actions are acknowledged without side effects.
 
 ## Stack
 
@@ -50,7 +50,7 @@ Entry point:
 2. The route delegates to `process_chat_message()` in `app/orchestrator/service.py`.
 3. The orchestrator calls `memory_store.ensure_session()`.
 4. The user message is appended to SQLite.
-5. The current session phase and history are loaded from SQLite.
+5. The context builder loads the current phase, recent history, and compressed older memory from SQLite.
 6. The system prompt is loaded from `docs/ORCHESTRATION_SPEC.md`.
 7. Groq is called through `httpx.Client` with `response_format: {"type": "json_object"}`.
 8. The response is parsed into `LLMResponse(reply, pending_actions[])`.
@@ -121,13 +121,11 @@ Check health:
 Invoke-RestMethod http://localhost:8000/health
 ```
 
-## What Is Not Yet Built
+## Current Tool Scope
 
-- `app/tools/` is empty.
-- `app/prompts/` is empty.
-- Confirmed actions are recorded in SQLite but are not executed.
-- Prompt templates are not loaded from `app/prompts/`.
-- The active system prompt is loaded from `docs/ORCHESTRATION_SPEC.md`.
+- `app/tools/executor.py` implements the first safe tool: session note saving for `save` and `write` actions.
+- `update`, `organize`, and `delete` actions are acknowledged after confirmation but intentionally do not perform external side effects yet.
+- Prompt templates are not loaded from `app/prompts/`; the active system prompt is loaded from `docs/ORCHESTRATION_SPEC.md`.
 
 ## Rules
 

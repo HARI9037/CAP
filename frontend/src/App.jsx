@@ -3,11 +3,20 @@ import { useChat } from "./useChat";
 import MessageContent from "./MessageContent";
 import SessionInsightPanel from "./SessionInsightPanel";
 
+function hasSeenColdStartNotice() {
+  try {
+    return localStorage.getItem("cap_cold_start_notice_seen") === "true";
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [input, setInput] = useState("");
+  const [confirmingId, setConfirmingId] = useState(null);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [coldStartNoticeOpen, setColdStartNoticeOpen] = useState(() => {
-    return localStorage.getItem("cap_cold_start_notice_seen") !== "true";
+    return !hasSeenColdStartNotice();
   });
   const {
     messages,
@@ -26,6 +35,7 @@ export default function App() {
     sessions,
     loadSession,
     performDeleteSession,
+    handleConfirm,
   } = useChat();
 
   const messagesEndRef = useRef(null);
@@ -42,8 +52,22 @@ export default function App() {
   };
 
   const dismissColdStartNotice = () => {
-    localStorage.setItem("cap_cold_start_notice_seen", "true");
+    try {
+      localStorage.setItem("cap_cold_start_notice_seen", "true");
+    } catch {
+      // Dismiss the modal for this render even when persistence is unavailable.
+    }
     setColdStartNoticeOpen(false);
+  };
+
+  const onConfirmAction = async (actionId, actionType, approved) => {
+    if (confirmingId) return;
+    setConfirmingId(actionId);
+    try {
+      await handleConfirm(actionId, actionType, approved);
+    } finally {
+      setConfirmingId(null);
+    }
   };
 
   return (
@@ -178,6 +202,22 @@ export default function App() {
                     </div>
                     <div className="text-[#64748B] text-[11px] mt-1 uppercase tracking-tight font-medium">
                       {action.action_type}
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => onConfirmAction(action.action_id, action.action_type, true)}
+                        disabled={confirmingId === action.action_id}
+                        className="flex-1 bg-[#10B981] hover:bg-[#059669] text-white text-[11px] font-semibold uppercase tracking-wider rounded px-2 py-1.5 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {"\u2713"} Approve
+                      </button>
+                      <button
+                        onClick={() => onConfirmAction(action.action_id, action.action_type, false)}
+                        disabled={confirmingId === action.action_id}
+                        className="flex-1 border border-[#EF4444] text-[#EF4444] hover:bg-[#EF4444]/10 text-[11px] font-semibold uppercase tracking-wider rounded px-2 py-1.5 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {"\u2717"} Reject
+                      </button>
                     </div>
                   </div>
                 ))}

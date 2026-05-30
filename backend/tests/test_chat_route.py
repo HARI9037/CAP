@@ -163,6 +163,47 @@ def test_chat_endpoint_respects_architecture_review_phase(tmp_path, monkeypatch)
     assert _workflow_state(db_path, "architecture-session")["phase"] == "architecture_review"
 
 
+def test_chat_endpoint_sends_compressed_memory_without_extra_system_messages(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "compressed-context.db"
+
+    def fake_groq_call(session_history, current_phase, settings):
+        assert current_phase == "general_chat"
+        assert session_history[0]["role"] == "assistant"
+        assert session_history[0]["content"].startswith("Earlier session summary:")
+        assert all(message["role"] != "system" for message in session_history)
+        assert session_history[-1] == {
+            "role": "user",
+            "content": "Message 16",
+        }
+        return json.dumps(
+            {
+                "reply": "Context is still coherent.",
+                "pending_actions": [],
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("long-session")
+        for index in range(15):
+            role = "user" if index % 2 == 0 else "assistant"
+            memory_store.append_message("long-session", role, f"Message {index + 1}")
+        response = client.post(
+            "/chat",
+            json={"message": "Message 16", "session_id": "long-session"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["reply"] == "Context is still coherent."
+
+
 def test_chat_endpoint_returns_fallback_on_groq_timeout(tmp_path, monkeypatch):
     db_path = tmp_path / "timeout.db"
 

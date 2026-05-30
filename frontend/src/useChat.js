@@ -1,6 +1,26 @@
 import { useState, useEffect } from "react";
 // Make sure this path points correctly to your api.js file
-import { sendMessage, getHealth, getMemory, deleteSession } from "./services/api";
+import { sendMessage, getHealth, getMemory, deleteSession, confirmAction } from "./services/api";
+
+function loadStoredSessions() {
+  try {
+    const saved = localStorage.getItem("cap_sessions");
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn("Ignoring invalid saved CAP sessions:", err);
+    localStorage.removeItem("cap_sessions");
+    return [];
+  }
+}
+
+function saveStoredSessions(sessions) {
+  try {
+    localStorage.setItem("cap_sessions", JSON.stringify(sessions));
+  } catch (err) {
+    console.warn("Could not persist CAP sessions:", err);
+  }
+}
 
 export function useChat() {
   const [messages, setMessages] = useState([]);
@@ -15,10 +35,7 @@ export function useChat() {
   const [lastReply, setLastReply] = useState("");
   const [healthStatus, setHealthStatus] = useState("unavailable");
 
-  const [sessions, setSessions] = useState(() => {
-    const saved = localStorage.getItem("cap_sessions");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [sessions, setSessions] = useState(loadStoredSessions);
 
   // Polling engine using the backend health endpoint.
   useEffect(() => {
@@ -83,7 +100,7 @@ export function useChat() {
 
       setSessions((prev) => {
         const filtered = prev.filter((s) => s.id !== id);
-        localStorage.setItem("cap_sessions", JSON.stringify(filtered));
+        saveStoredSessions(filtered);
         return filtered;
       });
 
@@ -95,8 +112,36 @@ export function useChat() {
     }
   };
 
+  const handleConfirm = async (actionId, actionType, approved) => {
+    if (!sessionId) return;
+    try {
+      const result = await confirmAction(actionId, actionType, approved, sessionId);
+      const remainingActions = Array.isArray(result.remaining_actions)
+        ? result.remaining_actions
+        : pendingActions.filter((action) => action.action_id !== actionId);
+
+      setPendingActions(remainingActions);
+      if (result.execution_result) {
+        const execMsg = {
+          role: "assistant",
+          content: result.execution_result,
+        };
+        setMessages((prev) => [...prev, execMsg]);
+      }
+      if (result.memory_summary) {
+        setMemorySummary(result.memory_summary);
+      }
+      setChatState(remainingActions.length > 0 ? "awaiting_confirmation" : "ready");
+      setLastError(null);
+      setLastApiResult({ ok: true, label: approved ? "Action Approved" : "Action Rejected" });
+    } catch (err) {
+      console.error("Confirmation failed:", err);
+      setLastError("confirm_failed");
+      setLastApiResult({ ok: false, label: "Confirm Failed" });
+    }
+  };
+
   const send = async (text) => {
-    console.log("DEBUG: Send clicked, message:", text);
     if (!text.trim()) return;
     setLoading(true);
 
@@ -105,7 +150,6 @@ export function useChat() {
 
     try {
       const response = await sendMessage(text, sessionId);
-      console.log("DEBUG: API Response:", response);
       const workflowState = response.memory_summary?.workflow_state || {};
       setChatState(response.state || null);
       setSessionPhase(workflowState.phase || (response.state === "fallback" ? "fallback" : "general_chat"));
@@ -131,7 +175,7 @@ export function useChat() {
 
         setSessions((prev) => {
           const updated = [newSession, ...prev];
-          localStorage.setItem("cap_sessions", JSON.stringify(updated));
+          saveStoredSessions(updated);
           return updated;
         });
       }
@@ -143,7 +187,6 @@ export function useChat() {
       setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
       console.error(error);
-      console.error("DEBUG: CRITICAL ERROR in send:", error);
       setChatState("offline");
       setSessionPhase("fallback");
       setPendingActions([]);
@@ -188,5 +231,6 @@ export function useChat() {
     sessions,
     loadSession,
     performDeleteSession,
+    handleConfirm,
   };
 }

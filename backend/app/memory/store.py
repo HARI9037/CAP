@@ -53,19 +53,7 @@ class MemoryStore:
                     );
                     """
                 )
-                columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(messages);").fetchall()
-                }
-                if "id" not in columns:
-                    connection.execute("ALTER TABLE messages ADD COLUMN id INTEGER;")
-                    connection.execute(
-                        """
-                        UPDATE messages
-                        SET id = rowid
-                        WHERE id IS NULL;
-                        """
-                    )
+                self._ensure_message_schema(connection)
                 connection.commit()
 
             if demo_mode:
@@ -139,6 +127,7 @@ class MemoryStore:
                 )
                 connection.commit()
         return session_id
+
     def ensure_session(self, session_id: str | None = None) -> str:
         if session_id:
             with self._lock:
@@ -148,6 +137,64 @@ class MemoryStore:
                         return session_id
             return self.create_session(session_id=session_id)
         return self.create_session()
+
+    def _ensure_message_schema(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(messages);").fetchall()
+        }
+        now = _utc_now_iso()
+
+        if "id" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN id INTEGER;")
+            connection.execute(
+                """
+                UPDATE messages
+                SET id = rowid
+                WHERE id IS NULL;
+                """
+            )
+
+        if "message_id" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN message_id TEXT;")
+
+        if "timestamp" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN timestamp TEXT;")
+
+        if "created_at" in columns:
+            connection.execute(
+                """
+                UPDATE messages
+                SET timestamp = created_at
+                WHERE timestamp IS NULL OR timestamp = '';
+                """
+            )
+
+        connection.execute(
+            """
+            UPDATE messages
+            SET timestamp = ?
+            WHERE timestamp IS NULL OR timestamp = '';
+            """,
+            (now,),
+        )
+
+        rows = connection.execute(
+            """
+            SELECT rowid
+            FROM messages
+            WHERE message_id IS NULL OR message_id = '';
+            """
+        ).fetchall()
+        for row in rows:
+            connection.execute(
+                """
+                UPDATE messages
+                SET message_id = ?
+                WHERE rowid = ?;
+                """,
+                (str(uuid4()), row[0]),
+            )
 
     def get_session_phase(self, session_id: str) -> str:
         with self._lock:
@@ -160,19 +207,39 @@ class MemoryStore:
         now = _utc_now_iso()
         with self._lock:
             with self._connect() as connection:
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(messages);").fetchall()
+                }
+                insert_columns = [
+                    "message_id",
+                    "id",
+                    "session_id",
+                    "role",
+                    "content",
+                    "timestamp",
+                ]
+                values = [
+                    message_id,
+                    connection.execute(
+                        "SELECT COALESCE(MAX(id), 0) + 1 FROM messages;"
+                    ).fetchone()[0],
+                    session_id,
+                    role,
+                    content,
+                    now,
+                ]
+                if "created_at" in columns:
+                    insert_columns.append("created_at")
+                    values.append(now)
+
+                placeholders = ", ".join("?" for _ in insert_columns)
                 connection.execute(
-                    """
-                    INSERT INTO messages (message_id, id, session_id, role, content, timestamp)
-                    VALUES (
-                        ?,
-                        (SELECT COALESCE(MAX(id), 0) + 1 FROM messages),
-                        ?,
-                        ?,
-                        ?,
-                        ?
-                    );
+                    f"""
+                    INSERT INTO messages ({", ".join(insert_columns)})
+                    VALUES ({placeholders});
                     """,
-                    (message_id, session_id, role, content, now),
+                    values,
                 )
                 connection.execute(
                     """
@@ -192,7 +259,7 @@ class MemoryStore:
                     SELECT role, content
                     FROM messages
                     WHERE session_id = ?
-                    ORDER BY timestamp ASC;
+                    ORDER BY COALESCE(id, rowid) ASC, timestamp ASC;
                     """,
                     (session_id,),
                 )
@@ -254,6 +321,50 @@ class MemoryStore:
                     (json.dumps(current_state), now, session_id),
                 )
                 connection.commit()
+
+    def resolve_pending_action(
+        self,
+        session_id: str,
+        action_id: str,
+    ) -> tuple[dict | None, list[dict]]:
+        with self._lock:
+            with self._connect() as connection:
+                current_state = self._read_workflow_state(connection, session_id)
+                pending_actions = current_state.get("pending_actions") or []
+                if not isinstance(pending_actions, list):
+                    pending_actions = []
+
+                matched_action = None
+                remaining_actions = []
+                for action in pending_actions:
+                    if (
+                        matched_action is None
+                        and isinstance(action, dict)
+                        and action.get("action_id") == action_id
+                    ):
+                        matched_action = action
+                        continue
+                    if isinstance(action, dict):
+                        remaining_actions.append(action)
+
+                if matched_action is not None:
+                    current_state["pending_actions"] = remaining_actions
+                    current_state["state"] = (
+                        "awaiting_confirmation" if remaining_actions else "ready"
+                    )
+
+                    now = _utc_now_iso()
+                    connection.execute(
+                        """
+                        UPDATE sessions
+                        SET workflow_state = ?, updated_at = ?
+                        WHERE session_id = ?;
+                        """,
+                        (json.dumps(current_state), now, session_id),
+                    )
+                    connection.commit()
+
+                return matched_action, remaining_actions
 
     def update_session_workflow_state(self, session_id: str, updates: dict) -> None:
         with self._lock:

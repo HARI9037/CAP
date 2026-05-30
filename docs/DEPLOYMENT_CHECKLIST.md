@@ -14,8 +14,8 @@ Ensure the following variables are configured in both local `.env` and productio
 ## Backend Deployment (Render)
 1. **Type**: Web Service
 2. **Environment**: Python
-3. **Build Command**: `pip install -r requirements.txt`
-4. **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+3. **Build Command**: `pip install -r backend/requirements.txt`
+4. **Start Command**: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 5. **Health Check URL**: `GET /health`
 6. **Free-Tier Constraints**: The backend uses minimal packages (FastAPI, httpx, sqlite) to avoid Render's memory limits and cold-start timeouts. **Do not** add Playwright or heavy Chromium dependencies.
 

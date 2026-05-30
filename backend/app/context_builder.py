@@ -49,10 +49,11 @@ def build_context(session_id: str) -> Dict[str, Any]:
     phase: str = memory_store.get_session_phase(session_id) or ""
     summary_dict: Dict[str, Any] = memory_store.get_session_summary(session_id) or {
     }
-    # workflow_state may be stored under "state" or "workflow_state"
-    workflow_state = summary_dict.get(
-        "state") or summary_dict.get("workflow_state") or ""
-    workflow_context = {"phase": phase, "state": workflow_state}
+    workflow_state = summary_dict.get("workflow_state") or {}
+    workflow_state_str = (
+        workflow_state.get("state", "") if isinstance(workflow_state, dict) else ""
+    )
+    workflow_context = {"phase": phase, "state": workflow_state_str}
 
     # --- system context generation ------------------------------------------
     # User intent hint – try to extract a short intent from the memory summary if present
@@ -71,10 +72,13 @@ def build_context(session_id: str) -> Dict[str, Any]:
 
     # --- assemble final LLM messages ---------------------------------------
     llm_messages: List[Dict[str, str]] = []
-    if system_context:
-        llm_messages.append({"role": "system", "content": system_context})
     if compressed_memory:
-        llm_messages.append({"role": "system", "content": compressed_memory})
+        llm_messages.append(
+            {
+                "role": "assistant",
+                "content": f"Earlier session summary: {compressed_memory}",
+            }
+        )
     # Add recent messages preserving their original role/content
     llm_messages.extend(recent_messages)
 

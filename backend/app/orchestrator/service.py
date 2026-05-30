@@ -7,7 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+from ..context_builder import build_context
 from ..memory.store import memory_store
+from ..tools.executor import execute_tool
 from ..utils.env import Settings
 
 SPEC_PATH = Path(__file__).resolve(
@@ -159,7 +161,8 @@ def _parse_llm_response(raw_response: str) -> LLMResponse:
                     "pending_actions": parsed_response.get("pending_actions", []),
                 }
         elif isinstance(parsed_response["reply"], str):
-            parsed_response["reply"] = _clean_reply_text(parsed_response["reply"])
+            parsed_response["reply"] = _clean_reply_text(
+                parsed_response["reply"])
         if not isinstance(parsed_response.get("pending_actions", []), list):
             parsed_response["pending_actions"] = []
         else:
@@ -245,8 +248,9 @@ def process_chat_message(
 
     active_session_id = memory_store.ensure_session(session_id=session_id)
     memory_store.append_message(active_session_id, "user", message)
-    current_phase = memory_store.get_session_phase(active_session_id)
-    session_history = memory_store.get_session_history(active_session_id)
+    context = build_context(active_session_id)
+    current_phase = context["workflow_context"].get("phase", "general_chat")
+    session_history = context["llm_messages"]
 
     try:
         raw_llm_response = _call_groq_api(
@@ -347,32 +351,56 @@ def handle_confirmation(
             "action_id": action_id,
             "status": "not_required",
             "message": "Confirmation is not required for read-only actions.",
+            "execution_result": None,
+            "remaining_actions": memory_store.get_pending_actions(session_id),
+            "memory_summary": memory_store.get_session_summary(session_id),
         }
 
-    with memory_store._connect() as connection:
-        workflow_state = memory_store._read_workflow_state(
-            connection, session_id)
-    pending_actions = workflow_state.get("pending_actions") or []
-
-    if isinstance(pending_actions, list):
-        updated_pending_actions = [
-            action
-            for action in pending_actions
-            if isinstance(action, dict) and action.get("action_id") != action_id
-        ]
-    else:
-        updated_pending_actions = []
-
-    memory_store.update_session_workflow_state(
-        session_id=session_id,
-        updates={
-            "pending_actions": updated_pending_actions,
-            "state": "ready" if not updated_pending_actions else "awaiting_confirmation",
-        },
+    matching_action, updated_pending_actions = memory_store.resolve_pending_action(
+        session_id,
+        action_id,
     )
+
+    if matching_action is None:
+        return {
+            "ok": True,
+            "action_id": action_id,
+            "status": "not_found",
+            "message": "Action is no longer pending.",
+            "execution_result": None,
+            "remaining_actions": updated_pending_actions,
+            "memory_summary": memory_store.get_session_summary(session_id),
+        }
+
+    execution_result = None
+    if approved:
+        action_payload = matching_action.get("payload", {})
+        resolved_action_type = matching_action.get("action_type") or action_type
+        try:
+            tool_result = execute_tool(
+                resolved_action_type, action_id, action_payload)
+            if tool_result.get("success"):
+                execution_result = (
+                    f"\u2713 Action executed: {tool_result['message']}"
+                )
+                if tool_result.get("data", {}).get("note"):
+                    memory_store.update_session_summary(
+                        session_id,
+                        tool_result["data"]["note"],
+                    )
+                    execution_result += f"\n\n{tool_result['data']['note']}"
+            else:
+                execution_result = "\u26a0 Action could not be completed at this time."
+        except Exception:
+            logger.exception(
+                "Tool execution failed for action_id=%s", action_id)
+            execution_result = "\u26a0 Action failed. Session context is preserved."
 
     return {
         "ok": True,
         "action_id": action_id,
         "status": "approved" if approved else "rejected",
+        "execution_result": execution_result,
+        "remaining_actions": updated_pending_actions,
+        "memory_summary": memory_store.get_session_summary(session_id),
     }
