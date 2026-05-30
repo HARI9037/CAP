@@ -72,7 +72,7 @@ You must ALWAYS respond in valid JSON matching exactly this schema:
 Rules:
 1. CRITICAL: Return ONLY a raw JSON object. No markdown. No ```json fences. No prose before or after. Your entire response must start with { and end with }.
 2. If the user asks you to modify, save, write, organize, or delete something, you MUST propose a pending action.
-3. Keep your conversational "reply" concise, professional, and under 3 sentences.
+3. Keep your conversational "reply" concise, professional.
 4. If no actions are required, return an empty array [] for "pending_actions".
 5. NEVER explain yourself outside the JSON. NEVER say "Here is the JSON". Just output the JSON.
 ```
