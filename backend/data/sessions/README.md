@@ -1,9 +1,15 @@
-# sessions/
-Purpose:
-Stores individual session data files for workflow continuity.
-Responsibilities:
-- One file per user session
-- Contains session metadata and task history
-Rules:
-- Managed only by the memory module
-- No direct writes from routes or orchestrator
+# data/sessions/
+
+## Purpose
+
+Reserved directory for possible future session artifacts.
+
+## Current Status
+
+This directory is EMPTY and unused at runtime.
+
+## Runtime Session Storage
+
+- Sessions live as rows in `backend/data/cap.db`.
+- SQLite access is managed by `app/memory/store.py`.
+- Session data is not stored as files in this directory.

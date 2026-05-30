@@ -1,9 +1,11 @@
 # docs/
-Purpose:
-Project documentation for CAP.
-Files:
-- ARCHITECTURE.md - full system architecture diagram and explanation
-- USER_FLOW.md - step by step user journey and flow diagram
-- DEPLOYMENT.md - Netlify and Render deployment instructions
-- MVP_SCOPE.md - what is included and excluded from the MVP
-- API_CONTRACT.md - current backend request/response contracts for the MVP
+
+## Purpose
+
+Project documentation and runtime orchestration spec for CAP.
+
+## Files
+
+- `ORCHESTRATION_SPEC.md` - live orchestration config loaded at runtime by `backend/app/orchestrator/service.py`; includes system prompt, phases, decision rules, tool contract, output schema, and failure handling.
+- `API_CONTRACT.md` - API routes and request/response shapes.
+- `DEPLOYMENT_CHECKLIST.md` - pre-deployment checks for Render backend and Netlify frontend.
