@@ -115,7 +115,7 @@ CAP_NEW/
 ### 1. Clone and enter the project
 
 ```powershell
-git clone <your-repo-url>
+git clone https://github.com/HARI9037/CAP.git
 cd CAP_NEW
 ```
 
@@ -227,10 +227,6 @@ curl http://localhost:8000/health
   "demo_mode": false
 }
 ```
-
-### `GET /ping`
-
-Compatibility health endpoint. It returns the same health fields plus `healthy: true`.
 
 ### `POST /chat`
 
