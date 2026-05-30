@@ -122,6 +122,56 @@ def test_chat_endpoint_stores_pending_actions_and_awaits_confirmation(
     assert state["pending_actions"] == [action]
 
 
+def test_chat_endpoint_surfaces_roadmap_payload_in_chat(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "roadmap-payload.db"
+    roadmap = (
+        "3-Day Roadmap for Building an Admin Dashboard\n\n"
+        "Day 1: Define roles, database tables, and attendance entry screens.\n"
+        "Day 2: Build teacher workflows, attendance APIs, and dashboard filters.\n"
+        "Day 3: Add reports, polish validation, test deployment, and fix edge cases."
+    )
+    action = {
+        "action_id": "roadmap-1",
+        "action_type": "write",
+        "description": "Write the 3-day roadmap.",
+        "payload": {
+            "title": "3-Day Roadmap",
+            "content": roadmap,
+        },
+    }
+
+    def fake_groq_call(session_history, current_phase, settings):
+        return json.dumps(
+            {
+                "reply": "3-Day Roadmap for Building an Admin Dashboard",
+                "pending_actions": [action],
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": "give me the road map here in the chat",
+                "session_id": "roadmap-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["reply"] == roadmap
+    assert payload["pending_actions"] == []
+    assert payload["state"] == "ready"
+    assert _workflow_state(db_path, "roadmap-session")["pending_actions"] == []
+
+
 def test_chat_endpoint_respects_architecture_review_phase(tmp_path, monkeypatch):
     db_path = tmp_path / "architecture-review.db"
 

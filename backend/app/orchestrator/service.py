@@ -35,6 +35,40 @@ PARSE_FALLBACK_REPLY = (
 )
 logger = logging.getLogger(__name__)
 TEXT_RESPONSE_KEYS = ("reply", "message", "content", "response", "text")
+CONTENT_REQUEST_KEYWORDS = (
+    "checklist",
+    "compare",
+    "comparison",
+    "explain",
+    "guide",
+    "plan",
+    "road map",
+    "roadmap",
+    "steps",
+    "tech stack",
+    "workflow",
+)
+STATE_CHANGING_KEYWORDS = (
+    "delete",
+    "modify",
+    "organize",
+    "remember",
+    "save",
+    "store",
+    "update",
+)
+ACTION_CONTENT_KEYS = (
+    "content",
+    "markdown",
+    "roadmap",
+    "checklist",
+    "plan",
+    "workflow",
+    "answer",
+    "body",
+    "text",
+    "description",
+)
 
 
 class ConfigurationError(RuntimeError):
@@ -226,6 +260,70 @@ def _clean_reply_text(reply: str) -> str:
     return cleaned.strip()
 
 
+def _looks_like_content_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in CONTENT_REQUEST_KEYWORDS)
+
+
+def _looks_state_changing(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in STATE_CHANGING_KEYWORDS)
+
+
+def _reply_is_too_thin_for_content(reply: str) -> bool:
+    normalized = reply.strip()
+    if len(normalized) < 90:
+        return True
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    return len(lines) <= 2 and not re.search(r"(^|\n)\s*([-*]|\d+\.)\s+", normalized)
+
+
+def _extract_action_content(value: object) -> str | None:
+    if isinstance(value, str):
+        cleaned = _clean_reply_text(value)
+        return cleaned if cleaned else None
+    if isinstance(value, dict):
+        for key in ACTION_CONTENT_KEYS:
+            extracted = _extract_action_content(value.get(key))
+            if extracted:
+                return extracted
+        for nested_value in value.values():
+            extracted = _extract_action_content(nested_value)
+            if extracted:
+                return extracted
+    if isinstance(value, list):
+        items = [
+            extracted
+            for item in value
+            if (extracted := _extract_action_content(item))
+        ]
+        if items:
+            return "\n".join(items)
+    return None
+
+
+def _repair_content_generation_response(
+    message: str,
+    llm_response: LLMResponse,
+) -> LLMResponse:
+    """
+    Some models treat "write me a roadmap" as a mutating action and put the
+    useful answer in an action payload. For pure chat content requests, surface
+    that content in the visible reply instead of hiding it behind approval.
+    """
+    if not _looks_like_content_request(message) or _looks_state_changing(message):
+        return llm_response
+    if not llm_response.pending_actions:
+        return llm_response
+
+    for action in llm_response.pending_actions:
+        extracted = _extract_action_content(action.payload)
+        if extracted and (len(extracted) > len(llm_response.reply) or _reply_is_too_thin_for_content(llm_response.reply)):
+            return LLMResponse(reply=extracted, pending_actions=[])
+
+    return llm_response
+
+
 def _build_fallback_result(
     session_id: str,
     error: str,
@@ -313,6 +411,7 @@ def process_chat_message(
             reply=PARSE_FALLBACK_REPLY,
         )
 
+    llm_response = _repair_content_generation_response(message, llm_response)
     pending_actions = [action.model_dump()
                        for action in llm_response.pending_actions]
     memory_store.append_message(
