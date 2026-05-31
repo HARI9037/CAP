@@ -565,6 +565,53 @@ def test_chat_endpoint_retries_thin_techstack_reply(
     assert payload["state"] == "ready"
 
 
+def test_chat_endpoint_treats_memory_recall_as_informational_and_completes_cutoff(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "memory-recall-cutoff.db"
+    calls = []
+    full_reply = (
+        "In this session, we discussed CAP as a context-aware assistant, "
+        "covered memory, action approvals, deployment planning, and generated "
+        "a deployment checklist with backend and frontend readiness steps."
+    )
+
+    def fake_groq_call(session_history, current_phase, settings):
+        calls.append(session_history)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply": (
+                        "In this session, we discussed CAP as a context-aware "
+                        "assistant and generated a deployment checklist with"
+                    ),
+                    "pending_actions": [],
+                }
+            )
+        return json.dumps({"reply": full_reply, "pending_actions": []})
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "message": "What do you remember from this session?",
+                "session_id": "memory-recall-session",
+            },
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert payload["reply"] == full_reply
+    assert payload["pending_actions"] == []
+    assert payload["state"] == "ready"
+    assert _workflow_state(db_path, "memory-recall-session")["pending_actions"] == []
+
+
 def test_chat_endpoint_respects_architecture_review_phase(tmp_path, monkeypatch):
     db_path = tmp_path / "architecture-review.db"
 
@@ -645,6 +692,56 @@ def test_chat_endpoint_sends_compressed_memory_without_extra_system_messages(
     payload = response.json()
     assert payload["ok"] is True
     assert payload["reply"] == "Context is still coherent."
+
+
+def test_chat_endpoint_expands_context_for_memory_recall(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "expanded-recall-context.db"
+
+    def fake_groq_call(session_history, current_phase, settings):
+        assert current_phase == "general_chat"
+        assert session_history[0]["role"] == "assistant"
+        assert session_history[0]["content"].startswith("Earlier session summary:")
+        assert "Message 1" in session_history[0]["content"]
+        assert len(session_history) == 41
+        assert session_history[1] == {"role": "assistant", "content": "Message 6"}
+        assert session_history[-1] == {
+            "role": "user",
+            "content": "What do you remember from this session?",
+        }
+        return json.dumps(
+            {
+                "reply": "I can recall the broader session context.",
+                "pending_actions": [],
+            }
+        )
+
+    monkeypatch.setattr("app.orchestrator.service._call_groq_api", fake_groq_call)
+    app = create_app(settings=_settings(db_path))
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("expanded-recall-session")
+        for index in range(44):
+            role = "user" if index % 2 == 0 else "assistant"
+            memory_store.append_message(
+                "expanded-recall-session",
+                role,
+                f"Message {index + 1}",
+            )
+        response = client.post(
+            "/chat",
+            json={
+                "message": "What do you remember from this session?",
+                "session_id": "expanded-recall-session",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["reply"] == "I can recall the broader session context."
 
 
 def test_chat_endpoint_returns_fallback_on_groq_timeout(tmp_path, monkeypatch):

@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
-from ..context_builder import build_context
+from ..context_builder import build_context, _is_memory_recall_request
 from ..memory.store import memory_store
 from ..tools.executor import execute_tool
 from ..utils.env import Settings
@@ -50,10 +50,14 @@ CONTENT_REQUEST_KEYWORDS = (
     "guide",
     "recommend",
     "recommendation",
+    "recap",
     "plan",
     "road map",
     "roadmap",
+    "session summary",
     "steps",
+    "summarize",
+    "summary",
     "tech-stack",
     "tech stack",
     "techstack",
@@ -174,6 +178,7 @@ def _call_groq_api(
         "model": settings.groq_model,
         "messages": messages,
         "response_format": {"type": "json_object"},
+        "max_tokens": settings.groq_max_tokens,
     }
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
@@ -289,11 +294,15 @@ def _clean_reply_text(reply: str) -> str:
 
 
 def _looks_like_content_request(message: str) -> bool:
+    if _is_memory_recall_request(message):
+        return True
     lowered = message.lower()
     return any(keyword in lowered for keyword in CONTENT_REQUEST_KEYWORDS)
 
 
 def _looks_state_changing(message: str) -> bool:
+    if _is_memory_recall_request(message):
+        return False
     lowered = message.lower()
     return any(re.search(pattern, lowered) for pattern in STATE_CHANGING_PATTERNS)
 
@@ -378,6 +387,12 @@ def _repair_content_generation_response(
 
 def _needs_content_retry(message: str, llm_response: LLMResponse) -> bool:
     if _should_keep_pending_actions(message):
+        return False
+    if (
+        _is_memory_recall_request(message)
+        and len(llm_response.reply.strip()) >= 140
+        and not _reply_looks_truncated(llm_response.reply)
+    ):
         return False
     return (
         _looks_like_content_request(message)

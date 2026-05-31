@@ -16,6 +16,7 @@ ENV_KEYS = (
     "GROQ_API_KEY",
     "GROQ_API_URL",
     "GROQ_MODEL",
+    "GROQ_MAX_TOKENS",
     "GROQ_TIMEOUT_SECONDS",
 )
 DEFAULT_CORS_ORIGINS = (
@@ -87,6 +88,15 @@ def _as_float(raw_value: str | None, default: float) -> float:
         return default
 
 
+def _as_int(raw_value: str | None, default: int) -> int:
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -98,6 +108,7 @@ class Settings:
     groq_api_key: str | None = None
     groq_api_url: str = "https://api.groq.com/openai/v1/chat/completions"
     groq_model: str = "llama-3.1-8b-instant"
+    groq_max_tokens: int = 4096
     groq_timeout_seconds: float = 8.0
 
 
@@ -120,6 +131,7 @@ def get_settings() -> Settings:
             or "https://api.groq.com/openai/v1/chat/completions"
         ),
         groq_model=_env_value("GROQ_MODEL") or "llama-3.1-8b-instant",
+        groq_max_tokens=_as_int(_env_value("GROQ_MAX_TOKENS"), default=4096),
         groq_timeout_seconds=_as_float(
             _env_value("GROQ_TIMEOUT_SECONDS"),
             default=8.0,
