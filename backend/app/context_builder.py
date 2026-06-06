@@ -47,9 +47,9 @@ def _phase_hint(phase: str) -> str:
     return hints.get(phase, "Proceed with the current user request.")
 
 
-def build_context(session_id: str) -> Dict[str, Any]:
+def build_context(session_id: str, user_id: str) -> Dict[str, Any]:
     """Build structured context for the LLM."""
-    full_history: List[Dict[str, Any]] = memory_store.get_session_history(session_id) or []
+    full_history: List[Dict[str, Any]] = memory_store.get_session_history(session_id, user_id) or []
 
     latest_user_message = next(
         (
@@ -81,8 +81,8 @@ def build_context(session_id: str) -> Dict[str, Any]:
     )
     compressed_memory = _summarize_messages(older_messages, width=compressed_width)
 
-    phase: str = memory_store.get_session_phase(session_id) or ""
-    summary_dict: Dict[str, Any] = memory_store.get_session_summary(session_id) or {}
+    phase: str = memory_store.get_session_phase(session_id, user_id) or ""
+    summary_dict: Dict[str, Any] = memory_store.get_session_summary(user_id, session_id) or {}
     workflow_state = summary_dict.get("workflow_state") or {}
     workflow_state_str = (
         workflow_state.get("state", "") if isinstance(workflow_state, dict) else ""

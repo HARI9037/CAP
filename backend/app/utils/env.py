@@ -18,10 +18,18 @@ ENV_KEYS = (
     "GROQ_MODEL",
     "GROQ_MAX_TOKENS",
     "GROQ_TIMEOUT_SECONDS",
+    "CLERK_JWKS_URL",
+    "CLERK_ISSUER",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
 )
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "https://cap-mvp.vercel.app",
 )
 
@@ -110,6 +118,12 @@ class Settings:
     groq_model: str = "llama-3.1-8b-instant"
     groq_max_tokens: int = 4096
     groq_timeout_seconds: float = 8.0
+    clerk_jwks_url: str | None = None
+    clerk_issuer: str | None = None
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5.5"
 
 
 def get_settings() -> Settings:
@@ -136,6 +150,12 @@ def get_settings() -> Settings:
             _env_value("GROQ_TIMEOUT_SECONDS"),
             default=8.0,
         ),
+        clerk_jwks_url=_env_value("CLERK_JWKS_URL"),
+        clerk_issuer=_env_value("CLERK_ISSUER"),
+        supabase_url=_env_value("SUPABASE_URL"),
+        supabase_service_role_key=_env_value("SUPABASE_SERVICE_ROLE_KEY"),
+        openai_api_key=_env_value("OPENAI_API_KEY"),
+        openai_model=_env_value("OPENAI_MODEL") or "gpt-5.5",
     )
 
 

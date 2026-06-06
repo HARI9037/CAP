@@ -544,12 +544,14 @@ def _synthesize_pending_actions(message: str, reply: str) -> list[PendingAction]
 
 def _build_fallback_result(
     session_id: str,
+    user_id: str,
     error: str,
     reply: str,
 ) -> ChatResult:
-    memory_store.append_message(session_id, "assistant", reply)
+    memory_store.append_message(session_id, "assistant", reply, user_id)
     memory_store.update_session_workflow_state(
         session_id=session_id,
+        user_id=user_id,
         updates={
             "phase": "fallback",
             "pending_actions": [],
@@ -560,7 +562,7 @@ def _build_fallback_result(
         session_id=session_id,
         reply=reply,
         pending_actions=[],
-        memory_summary=memory_store.get_session_summary(session_id),
+        memory_summary=memory_store.get_session_summary(user_id, session_id),
         state="fallback",
         error=error,
     )
@@ -568,15 +570,16 @@ def _build_fallback_result(
 
 def process_chat_message(
     message: str,
+    user_id: str,
     session_id: str | None = None,
     settings: Settings | None = None,
 ) -> ChatResult:
     if settings is None:
         raise RuntimeError("Settings are required for chat orchestration.")
 
-    active_session_id = memory_store.ensure_session(session_id=session_id)
-    memory_store.append_message(active_session_id, "user", message)
-    context = build_context(active_session_id)
+    active_session_id = memory_store.ensure_session(user_id=user_id, session_id=session_id)
+    memory_store.append_message(active_session_id, "user", message, user_id)
+    context = build_context(active_session_id, user_id)
     current_phase = context["workflow_context"].get("phase", "general_chat")
     session_history = context["llm_messages"]
 
@@ -590,6 +593,7 @@ def process_chat_message(
         logger.exception("Groq configuration is missing.")
         return _build_fallback_result(
             session_id=active_session_id,
+            user_id=user_id,
             error="groq_configuration_missing",
             reply=(
                 "GROQ_API_KEY is not configured. Add it to backend/.env "
@@ -600,6 +604,7 @@ def process_chat_message(
         logger.exception("Groq request timed out.")
         return _build_fallback_result(
             session_id=active_session_id,
+            user_id=user_id,
             error="groq_timeout",
             reply=TIMEOUT_FALLBACK_REPLY,
         )
@@ -607,6 +612,7 @@ def process_chat_message(
         logger.exception("Groq API returned an error response.")
         return _build_fallback_result(
             session_id=active_session_id,
+            user_id=user_id,
             error="groq_api_failure",
             reply=TIMEOUT_FALLBACK_REPLY,
         )
@@ -614,6 +620,7 @@ def process_chat_message(
         logger.exception("Groq request failed.")
         return _build_fallback_result(
             session_id=active_session_id,
+            user_id=user_id,
             error="groq_api_failure",
             reply=TIMEOUT_FALLBACK_REPLY,
         )
@@ -625,6 +632,7 @@ def process_chat_message(
             "Groq response could not be parsed as a valid LLMResponse.")
         return _build_fallback_result(
             session_id=active_session_id,
+            user_id=user_id,
             error="llm_parse_failure",
             reply=PARSE_FALLBACK_REPLY,
         )
@@ -721,14 +729,15 @@ def process_chat_message(
     pending_actions = [action.model_dump()
                        for action in llm_response.pending_actions]
     memory_store.append_message(
-        active_session_id, "assistant", llm_response.reply)
+        active_session_id, "assistant", llm_response.reply, user_id)
 
     if pending_actions:
-        memory_store.store_pending_actions(active_session_id, pending_actions)
+        memory_store.store_pending_actions(active_session_id, user_id, pending_actions)
         state = "awaiting_confirmation"
     else:
         memory_store.update_session_workflow_state(
             session_id=active_session_id,
+            user_id=user_id,
             updates={
                 "pending_actions": [],
                 "state": "ready",
@@ -737,19 +746,19 @@ def process_chat_message(
         state = "ready"
 
     summary_text = f"Last turn — User: {message[:80]} | Assistant: {llm_response.reply[:80]}"
-    memory_store.update_session_summary(active_session_id, summary_text)
+    memory_store.update_session_summary(active_session_id, user_id, summary_text)
 
     return ChatResult(
         session_id=active_session_id,
         reply=llm_response.reply,
         pending_actions=pending_actions,
-        memory_summary=memory_store.get_session_summary(active_session_id),
+        memory_summary=memory_store.get_session_summary(user_id, active_session_id),
         state=state,
     )
 
 
-def read_memory_summary(session_id: str | None = None) -> dict:
-    return memory_store.get_session_summary(session_id=session_id)
+def read_memory_summary(user_id: str, session_id: str | None = None) -> dict:
+    return memory_store.get_session_summary(user_id=user_id, session_id=session_id)
 
 
 def normalize_action_type(action_type: str) -> str:
@@ -766,9 +775,11 @@ def handle_confirmation(
     action_type: str,
     approved: bool,
     session_id: str,
+    user_id: str,
 ) -> dict:
     matching_action, updated_pending_actions = memory_store.resolve_pending_action(
         session_id,
+        user_id,
         action_id,
     )
 
@@ -779,8 +790,8 @@ def handle_confirmation(
             "status": "not_required",
             "message": "Confirmation is not required for read-only actions.",
             "execution_result": None,
-            "remaining_actions": memory_store.get_pending_actions(session_id),
-            "memory_summary": memory_store.get_session_summary(session_id),
+            "remaining_actions": memory_store.get_pending_actions(session_id, user_id),
+            "memory_summary": memory_store.get_session_summary(user_id, session_id),
         }
 
     if matching_action is None:
@@ -791,7 +802,7 @@ def handle_confirmation(
             "message": "Action is no longer pending.",
             "execution_result": None,
             "remaining_actions": updated_pending_actions,
-            "memory_summary": memory_store.get_session_summary(session_id),
+            "memory_summary": memory_store.get_session_summary(user_id, session_id),
         }
 
     action_description = matching_action.get("description")
@@ -811,6 +822,7 @@ def handle_confirmation(
                 if tool_result.get("data", {}).get("note"):
                     memory_store.update_session_summary(
                         session_id,
+                        user_id,
                         tool_result["data"]["note"],
                     )
                     execution_result += f"\n\n{tool_result['data']['note']}"
@@ -840,5 +852,5 @@ def handle_confirmation(
         "status": "approved" if approved else "rejected",
         "execution_result": execution_result,
         "remaining_actions": updated_pending_actions,
-        "memory_summary": memory_store.get_session_summary(session_id),
+        "memory_summary": memory_store.get_session_summary(user_id, session_id),
     }

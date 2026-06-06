@@ -8,15 +8,19 @@ async function readJsonResponse(res) {
     return data;
 }
 
+function authHeaders(token) {
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return headers;
+}
+
 /**
  * Sends a message to the backend within a new or ongoing session context.
  */
-export async function sendMessage(message, session_id = null) {
+export async function sendMessage(message, session_id = null, token = null) {
     const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers: authHeaders(token),
         body: JSON.stringify({
             message,
             session_id,
@@ -37,17 +41,20 @@ export async function getHealth() {
 /**
  * Loads memory and history for a prior session.
  */
-export async function getMemory(sessionId) {
-    const res = await fetch(`${BASE_URL}/memory?session_id=${encodeURIComponent(sessionId)}`);
+export async function getMemory(sessionId, token = null) {
+    const res = await fetch(`${BASE_URL}/memory?session_id=${encodeURIComponent(sessionId)}`, {
+        headers: authHeaders(token),
+    });
     return readJsonResponse(res);
 }
 
 /**
  * Permanently removes a target session sequence from the backend database indices.
  */
-export async function deleteSession(sessionId) {
+export async function deleteSession(sessionId, token = null) {
     const res = await fetch(`${BASE_URL}/memory?session_id=${encodeURIComponent(sessionId)}`, {
         method: "DELETE",
+        headers: authHeaders(token),
     });
 
     return readJsonResponse(res);
@@ -56,10 +63,10 @@ export async function deleteSession(sessionId) {
 /**
  * Approves or rejects a pending action via the CAP confirmation gate.
  */
-export async function confirmAction(actionId, actionType, approved, sessionId) {
+export async function confirmAction(actionId, actionType, approved, sessionId, token = null) {
     const res = await fetch(`${BASE_URL}/confirm`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(token),
         body: JSON.stringify({
             action_id: actionId,
             action_type: actionType,

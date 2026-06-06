@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/nextjs";
 // Make sure this path points correctly to your api.js file
 import { sendMessage, getHealth, getMemory, deleteSession, confirmAction } from "./services/api";
 
@@ -23,6 +24,7 @@ function saveStoredSessions(sessions) {
 }
 
 export function useChat() {
+  const { getToken } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
@@ -61,7 +63,8 @@ export function useChat() {
     setSessionId(id);
     setLoading(true);
     try {
-      const data = await getMemory(id);
+      const token = await getToken();
+      const data = await getMemory(id, token);
 
       if (data && Array.isArray(data.history)) {
         setMessages(data.history);
@@ -96,7 +99,8 @@ export function useChat() {
   const performDeleteSession = async (id, e) => {
     if (e) e.stopPropagation();
     try {
-      await deleteSession(id);
+      const token = await getToken();
+      await deleteSession(id, token);
 
       setSessions((prev) => {
         const filtered = prev.filter((s) => s.id !== id);
@@ -115,7 +119,8 @@ export function useChat() {
   const handleConfirm = async (actionId, actionType, approved) => {
     if (!sessionId) return;
     try {
-      const result = await confirmAction(actionId, actionType, approved, sessionId);
+      const token = await getToken();
+      const result = await confirmAction(actionId, actionType, approved, sessionId, token);
       const remainingActions = Array.isArray(result.remaining_actions)
         ? result.remaining_actions
         : pendingActions.filter((action) => action.action_id !== actionId);
@@ -149,7 +154,8 @@ export function useChat() {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const response = await sendMessage(text, sessionId);
+      const token = await getToken();
+      const response = await sendMessage(text, sessionId, token);
       const workflowState = response.memory_summary?.workflow_state || {};
       setChatState(response.state || null);
       setSessionPhase(workflowState.phase || (response.state === "fallback" ? "fallback" : "general_chat"));

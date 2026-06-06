@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel, Field, model_validator
 
 from ..orchestrator.service import process_chat_message
+from ..utils.auth import get_current_user_id
 
 router = APIRouter(tags=["chat"])
 
@@ -23,10 +24,11 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-def chat(payload: ChatRequest, request: Request) -> dict:
+def chat(payload: ChatRequest, request: Request, user_id: str = Depends(get_current_user_id)) -> dict:
     try:
         result = process_chat_message(
             message=payload.user_message,
+            user_id=user_id,
             session_id=payload.session_id,
             settings=request.app.state.settings,
         )
