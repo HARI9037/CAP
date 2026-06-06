@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, History, Lock, MessageSquare, ShieldCheck } from "lucide-react";
 
+import { AuthControls } from "@/components/auth-controls";
 import { Button } from "@/components/ui/button";
 
 const features = [
@@ -16,6 +17,9 @@ const steps = ["Talk naturally", "CAP learns relevant context", "CAP helps you t
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
+      <header className="flex items-center justify-end border-b px-6 py-4">
+        <AuthControls variant="landing" />
+      </header>
       <section className="relative overflow-hidden border-b">
         <div className="mx-auto grid min-h-[82vh] max-w-7xl content-center gap-10 px-6 py-20 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="max-w-3xl">

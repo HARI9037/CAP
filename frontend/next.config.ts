@@ -1,5 +1,11 @@
 import type { NextConfig } from "next";
 
+import { assertClerkBuildConfig } from "./src/lib/clerk-env";
+
+if (process.env.NODE_ENV === "production") {
+  assertClerkBuildConfig();
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,

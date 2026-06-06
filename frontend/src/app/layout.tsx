@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 
 import "./globals.css";
+import { clerkPublishableKey } from "@/lib/clerk-env";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "CAP - Context-Aware Partner",
@@ -10,10 +13,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
-      <html lang="en" className="dark">
-        <body>{children}</body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" className="dark">
+      <body>
+        <ClerkProvider publishableKey={clerkPublishableKey}>{children}</ClerkProvider>
+      </body>
+    </html>
   );
 }

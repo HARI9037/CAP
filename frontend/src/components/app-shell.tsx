@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 import { Brain, History, Home, MessageSquarePlus, Settings, Star, Database } from "lucide-react";
 
+import { AuthControls } from "@/components/auth-controls";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -52,7 +52,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             CAP
           </Link>
           <div className="hidden text-sm text-muted-foreground md:block">Context-aware decisions, confirmation first.</div>
-          <UserButton afterSignOutUrl="/" />
+          <div className="flex items-center gap-2">
+            <AuthControls />
+          </div>
         </header>
         {children}
       </main>
