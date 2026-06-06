@@ -26,32 +26,6 @@ class MemoryStore:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
-import json
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
-from threading import Lock
-from uuid import uuid4
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
-
-
-class MemoryStore:
-    def __init__(self) -> None:
-        self._db_path: Path | None = None
-        self._lock = Lock()
-
-    @property
-    def db_path(self) -> Path:
-        if self._db_path is None:
-            raise RuntimeError("Memory store is not initialized.")
-        return self._db_path
-
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
-
     def initialize(self, db_path: Path, demo_mode: bool = False) -> None:
         with self._lock:
             self._db_path = db_path
@@ -451,8 +425,8 @@ class MemoryStore:
         title: str,
         content: str,
         memory_type: str,
+        user_id: str,
         memory_id: str | None = None,
-        user_id: str = "local-user",
         source_session_id: str | None = None,
     ) -> dict:
         now = _utc_now_iso()
