@@ -2,7 +2,9 @@
 
 import { useAuth } from "@clerk/nextjs";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { apiBaseUrl } from "@/lib/clerk-env";
+
+const API_BASE_URL = apiBaseUrl || "http://127.0.0.1:8000";
 
 let cachedGetToken: (() => Promise<string | null>) | null = null;
 

@@ -32,6 +32,7 @@ DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:3000",
     "https://cap-mvp.vercel.app",
 )
+PLACEHOLDER_ENV_VALUES = {"<Render Secret>"}
 
 
 def _clean_env_value(raw_value: object) -> str | None:
@@ -39,6 +40,8 @@ def _clean_env_value(raw_value: object) -> str | None:
         return None
     value = str(raw_value).strip()
     if not value:
+        return None
+    if value in PLACEHOLDER_ENV_VALUES:
         return None
     return value
 

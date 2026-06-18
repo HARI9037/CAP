@@ -40,6 +40,18 @@ def test_missing_env_file_leaves_groq_key_unset(tmp_path, monkeypatch):
     assert settings.groq_api_key is None
 
 
+def test_placeholder_env_values_are_treated_as_unset(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("GROQ_API_KEY=<Render Secret>\n", encoding="utf-8")
+    _use_env_file(monkeypatch, env_file)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    env.load_environment()
+
+    settings = env.get_settings()
+
+    assert settings.groq_api_key is None
+
+
 def test_initialize_settings_loads_env_file_before_building_settings(
     tmp_path, monkeypatch
 ):
