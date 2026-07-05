@@ -86,7 +86,7 @@ Loaded by `app/utils/env.py` from process env or `backend/.env`.
 | `LOG_LEVEL` | `INFO` | Logging level. |
 | `DEMO_MODE` | `false` | Seeds demo data when memory initializes. |
 | `CAP_DB_PATH` | `backend/data/cap.db` | SQLite database path. |
-| `CORS_ORIGINS` | `http://localhost:5173`, `http://127.0.0.1:5173`, `https://cap-frontend.vercel.app` | Allowed frontend origins. |
+| `CORS_ORIGINS` | `http://localhost:5173`, `http://127.0.0.1:5173`, `https://cap-mvp.vercel.app` | Allowed frontend origins. |
 | `GROQ_API_KEY` | None | API key for live Groq responses. |
 | `GROQ_API_URL` | `https://api.groq.com/openai/v1/chat/completions` | Groq chat completions endpoint. |
 | `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model name. |
