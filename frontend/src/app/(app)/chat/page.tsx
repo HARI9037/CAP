@@ -1,70 +1,155 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClerkApiRequest } from '@/lib/api';
+
+import { ChatInput } from "./components/chat-input";
+import { ChatMessages } from "./components/chat-messages";
+import { MemorySummaryPanel } from "./components/memory-summary-panel";
+import type { ChatMessage, MemorySummary, PendingAction } from "./components/types";
+
+function createMessage(role: ChatMessage["role"], content: string): ChatMessage {
+  return {
+    id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content,
+  };
+}
 
 export default function ChatPage() {
   const apiRequest = useClerkApiRequest();
   const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState<any>(null);
+  const [reply, setReply] = useState('');
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [memorySummary, setMemorySummary] = useState<MemorySummary | null>(null);
+  const [chatState, setChatState] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, pendingActions, loading, reply]);
+
+  const sessionLabel = useMemo(() => {
+    return sessionId ? `${sessionId.slice(0, 8)}...` : "new session";
+  }, [sessionId]);
 
   const handleSendMessage = async () => {
     if (!message.trim()) return;
 
     setLoading(true);
     setError(null);
-    setResponse(null);
+    setReply("");
+    setPendingActions([]);
+
+    const userMessage = createMessage("user", message.trim());
+    setMessages((current) => [...current, userMessage]);
 
     try {
       const result = await apiRequest('/chat', {
         method: 'POST',
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: message.trim(), session_id: sessionId }),
       });
-      setResponse(result);
+
+      const nextReply = typeof result?.reply === "string" ? result.reply : "";
+      const nextPendingActions = Array.isArray(result?.pending_actions) ? result.pending_actions : [];
+
+      setReply(nextReply);
+      setPendingActions(nextPendingActions);
+      setMemorySummary(result?.memory_summary ?? null);
+      setChatState(result?.state ?? null);
+      if (result?.session_id) {
+        setSessionId(result.session_id);
+      }
+
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", nextReply || "No response"),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      setMessages((current) => [
+        ...current,
+        createMessage("assistant", "CAP could not reach the backend. Please try again."),
+      ]);
     } finally {
       setLoading(false);
       setMessage('');
     }
   };
 
-  return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Chat</h1>
+  const handleActionDecision = async (action: PendingAction, approved: boolean) => {
+    if (!sessionId) return;
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          placeholder="Type a message..."
-          className="flex-1 px-3 py-2 border rounded"
-          disabled={loading}
-        />
-        <button
-          onClick={handleSendMessage}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-        >
-          {loading ? 'Sending...' : 'Send'}
-        </button>
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await apiRequest('/confirm', {
+        method: 'POST',
+        body: JSON.stringify({
+          action_id: action.action_id,
+          action_type: action.action_type,
+          approved,
+          session_id: sessionId,
+        }),
+      });
+
+      const remainingActions = Array.isArray(result?.remaining_actions)
+        ? result.remaining_actions
+        : pendingActions.filter((currentAction) => currentAction.action_id !== action.action_id);
+
+      setPendingActions(remainingActions);
+      setMemorySummary(result?.memory_summary ?? memorySummary);
+      setChatState(remainingActions.length > 0 ? "awaiting_confirmation" : "ready");
+
+      if (typeof result?.execution_result === "string" && result.execution_result.trim()) {
+        setMessages((current) => [...current, createMessage("assistant", result.execution_result)]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6">
+      <div className="flex flex-col gap-2 border-b border-border pb-4">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+          Authenticated chat
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Chat</h1>
+          <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs text-muted-foreground">
+            {sessionLabel}
+          </span>
+        </div>
       </div>
 
-      {error && (
-        <div className="mt-4 p-3 bg-red-100 text-red-800 rounded">
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+      <MemorySummaryPanel memorySummary={memorySummary} sessionId={sessionId} chatState={chatState} />
 
-      {response && (
-        <div className="mt-4 p-3 bg-green-100 text-green-800 rounded">
-          <pre className="text-sm">{JSON.stringify(response, null, 2)}</pre>
+      {error ? (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-200">
+          <strong className="font-semibold">Error:</strong> {error}
         </div>
-      )}
+      ) : null}
+
+      <div className="flex-1 space-y-6">
+        <ChatMessages
+          messages={messages}
+          pendingActions={pendingActions}
+          loading={loading}
+          onApproveAction={(action) => handleActionDecision(action, true)}
+          onRejectAction={(action) => handleActionDecision(action, false)}
+        />
+        <div ref={scrollAnchorRef} />
+      </div>
+
+      <ChatInput value={message} onChange={setMessage} onSubmit={handleSendMessage} loading={loading} />
     </div>
   );
 }

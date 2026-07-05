@@ -10,7 +10,7 @@ services:
       - key: DEMO_MODE
         value: "false"
       - key: CORS_ORIGINS
-        sync: false
+        value: "https://cap-mvp.vercel.app,https://cap-mvp-v2.vercel.app,https://cap-mvp.netlify.app,http://localhost:5173,http://127.0.0.1:5173"
       - key: GROQ_API_KEY
         sync: false
       - key: CLERK_JWKS_URL
