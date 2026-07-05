@@ -11,6 +11,7 @@ ENV_KEYS = (
     "APP_VERSION",
     "LOG_LEVEL",
     "DEMO_MODE",
+    "DATABASE_URL",
     "CAP_DB_PATH",
     "CORS_ORIGINS",
     "GROQ_API_KEY",
@@ -116,6 +117,7 @@ class Settings:
     demo_mode: bool
     db_path: Path
     cors_origins: list[str]
+    database_url: str | None = None
     groq_api_key: str | None = None
     groq_api_url: str = "https://api.groq.com/openai/v1/chat/completions"
     groq_model: str = "llama-3.1-8b-instant"
@@ -140,6 +142,7 @@ def get_settings() -> Settings:
         app_version=_env_value("APP_VERSION") or "0.1.0",
         log_level=_env_value("LOG_LEVEL") or "INFO",
         demo_mode=_as_bool(_env_value("DEMO_MODE"), default=False),
+        database_url=_env_value("DATABASE_URL"),
         db_path=_resolve_db_path(_env_value("CAP_DB_PATH")),
         cors_origins=_parse_cors_origins(_env_value("CORS_ORIGINS")),
         groq_api_key=_env_value("GROQ_API_KEY"),

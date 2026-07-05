@@ -5,16 +5,48 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
+from typing import Any
 from uuid import uuid4
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+
+try:
+    from app.utils.env import get_settings
+except ModuleNotFoundError:
+    from backend.app.utils.env import get_settings
 
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+class _PostgresConnection:
+    def __init__(self, engine: Engine) -> None:
+        self._raw_connection = engine.raw_connection()
+
+    def __enter__(self) -> "_PostgresConnection":
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        if exc_type is not None:
+            self._raw_connection.rollback()
+        self._raw_connection.close()
+
+    def execute(self, sql: str, params: Any = None) -> Any:
+        cursor = self._raw_connection.cursor()
+        cursor.execute(sql.replace("?", "%s"), params or ())
+        return cursor
+
+    def commit(self) -> None:
+        self._raw_connection.commit()
+
+
 class MemoryStore:
     def __init__(self) -> None:
         self._db_path: Path | None = None
+        self._database_url: str | None = None
+        self._engine: Engine | None = None
         self._lock = Lock()
 
     @property
@@ -23,75 +55,28 @@ class MemoryStore:
             raise RuntimeError("Memory store is not initialized.")
         return self._db_path
 
-    def _connect(self) -> sqlite3.Connection:
+    @property
+    def _using_postgres(self) -> bool:
+        return self._database_url is not None
+
+    def _connect(self) -> sqlite3.Connection | _PostgresConnection:
+        if self._engine is not None:
+            return _PostgresConnection(self._engine)
         return sqlite3.connect(self.db_path)
 
     def initialize(self, db_path: Path, demo_mode: bool = False) -> None:
         with self._lock:
             self._db_path = db_path
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._database_url = get_settings().database_url
+            self._engine = (
+                create_engine(self._database_url, pool_pre_ping=True)
+                if self._database_url
+                else None
+            )
+            if not self._using_postgres:
+                self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as connection:
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        session_id TEXT PRIMARY KEY,
-                        user_id TEXT NOT NULL DEFAULT 'local-user',
-                        summary TEXT NOT NULL DEFAULT '',
-                        workflow_state TEXT NOT NULL DEFAULT '{}',
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    );
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS messages (\n                        message_id TEXT PRIMARY KEY,
-                        id INTEGER,
-                        session_id TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        timestamp TEXT NOT NULL,
-                        FOREIGN KEY (session_id) REFERENCES sessions (session_id)
-                    );
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS memories (
-                        memory_id TEXT PRIMARY KEY,
-                        user_id TEXT NOT NULL DEFAULT 'local-user',
-                        memory_type TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        source_session_id TEXT,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    );
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS feedback (
-                        feedback_id TEXT PRIMARY KEY,
-                        user_id TEXT NOT NULL DEFAULT 'local-user',
-                        rating INTEGER NOT NULL,
-                        comment TEXT NOT NULL DEFAULT '',
-                        created_at TEXT NOT NULL
-                    );
-                    """
-                )
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS settings (
-                        user_id TEXT PRIMARY KEY,
-                        theme TEXT NOT NULL DEFAULT 'dark',
-                        model TEXT NOT NULL DEFAULT 'gpt-5.5',
-                        memory_enabled INTEGER NOT NULL DEFAULT 1,
-                        confirmation_required INTEGER NOT NULL DEFAULT 1,
-                        updated_at TEXT NOT NULL
-                    );
-                    """
-                )
+                self._create_schema(connection)
                 self._ensure_session_schema(connection)
                 self._ensure_message_schema(connection)
                 connection.execute(
@@ -104,6 +89,89 @@ class MemoryStore:
 
             if demo_mode:
                 self._seed_demo_data()
+
+    def _create_schema(self, connection: sqlite3.Connection | _PostgresConnection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'local-user',
+                summary TEXT NOT NULL DEFAULT '',
+                workflow_state TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                message_id TEXT PRIMARY KEY,
+                id INTEGER,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions (session_id)
+            );
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memories (
+                memory_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'local-user',
+                memory_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                source_session_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feedback (
+                feedback_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'local-user',
+                rating INTEGER NOT NULL,
+                comment TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                user_id TEXT PRIMARY KEY,
+                theme TEXT NOT NULL DEFAULT 'dark',
+                model TEXT NOT NULL DEFAULT 'gpt-5.5',
+                memory_enabled INTEGER NOT NULL DEFAULT 1,
+                confirmation_required INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+    def _table_columns(self, connection: sqlite3.Connection | _PostgresConnection, table_name: str) -> set[str]:
+        if self._using_postgres:
+            rows = connection.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = ?;
+                """,
+                (table_name,),
+            ).fetchall()
+            return {row[0] for row in rows}
+        return {
+            row[1]
+            for row in connection.execute(f"PRAGMA table_info({table_name});").fetchall()
+        }
+
+    def _message_order_expression(self) -> str:
+        return "COALESCE(m.id, 0) ASC, m.timestamp ASC" if self._using_postgres else "COALESCE(m.id, m.rowid) ASC, m.timestamp ASC"
 
     def _seed_demo_data(self) -> None:
         with self._connect() as connection:
@@ -186,29 +254,24 @@ class MemoryStore:
         return self.create_session(user_id=user_id)
 
     def _ensure_session_schema(self, connection: sqlite3.Connection) -> None:
-        columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(sessions);").fetchall()
-        }
+        columns = self._table_columns(connection, "sessions")
         if "user_id" not in columns:
             connection.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local-user';")
             
     def _ensure_message_schema(self, connection: sqlite3.Connection) -> None:
-        columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(messages);").fetchall()
-        }
+        columns = self._table_columns(connection, "messages")
         now = _utc_now_iso()
 
         if "id" not in columns:
             connection.execute("ALTER TABLE messages ADD COLUMN id INTEGER;")
-            connection.execute(
-                """
-                UPDATE messages
-                SET id = rowid
-                WHERE id IS NULL;
-                """
-            )
+            if not self._using_postgres:
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET id = rowid
+                    WHERE id IS NULL;
+                    """
+                )
 
         if "message_id" not in columns:
             connection.execute("ALTER TABLE messages ADD COLUMN message_id TEXT;")
@@ -234,22 +297,40 @@ class MemoryStore:
             (now,),
         )
 
-        rows = connection.execute(
-            """
-            SELECT rowid
-            FROM messages
-            WHERE message_id IS NULL OR message_id = '';
-            """
-        ).fetchall()
-        for row in rows:
-            connection.execute(
+        if self._using_postgres:
+            rows = connection.execute(
                 """
-                UPDATE messages
-                SET message_id = ?
-                WHERE rowid = ?;
-                """,
-                (str(uuid4()), row[0]),
-            )
+                SELECT ctid
+                FROM messages
+                WHERE message_id IS NULL OR message_id = '';
+                """
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET message_id = ?
+                    WHERE ctid = ?;
+                    """,
+                    (str(uuid4()), row[0]),
+                )
+        else:
+            rows = connection.execute(
+                """
+                SELECT rowid
+                FROM messages
+                WHERE message_id IS NULL OR message_id = '';
+                """
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET message_id = ?
+                    WHERE rowid = ?;
+                    """,
+                    (str(uuid4()), row[0]),
+                )
 
     def get_session_phase(self, session_id: str, user_id: str) -> str:
         with self._lock:
@@ -266,10 +347,7 @@ class MemoryStore:
                 if not connection.execute("SELECT 1 FROM sessions WHERE session_id = ? AND user_id = ?;", (session_id, user_id)).fetchone():
                     raise ValueError("Session not found or access denied")
                     
-                columns = {
-                    row[1]
-                    for row in connection.execute("PRAGMA table_info(messages);").fetchall()
-                }
+                columns = self._table_columns(connection, "messages")
                 insert_columns = [
                     "message_id",
                     "id",
@@ -314,12 +392,12 @@ class MemoryStore:
         with self._lock:
             with self._connect() as connection:
                 cursor = connection.execute(
-                    """
+                    f"""
                     SELECT m.role, m.content
                     FROM messages m
                     JOIN sessions s ON m.session_id = s.session_id
                     WHERE m.session_id = ? AND s.user_id = ?
-                    ORDER BY COALESCE(m.id, m.rowid) ASC, m.timestamp ASC;
+                    ORDER BY {self._message_order_expression()};
                     """,
                     (session_id, user_id),
                 )
@@ -374,12 +452,12 @@ class MemoryStore:
         with self._lock:
             with self._connect() as connection:
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT m.message_id, m.role, m.content, m.timestamp
                     FROM messages m
                     JOIN sessions s ON m.session_id = s.session_id
                     WHERE m.session_id = ? AND s.user_id = ?
-                    ORDER BY COALESCE(m.id, m.rowid) ASC, m.timestamp ASC;
+                    ORDER BY {self._message_order_expression()};
                     """,
                     (session_id, user_id),
                 ).fetchall()
