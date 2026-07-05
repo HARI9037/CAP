@@ -166,7 +166,7 @@ npm install
 Create `frontend/.env` for local development:
 
 ```env
-VITE_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
 Start the frontend:
@@ -204,11 +204,11 @@ These are loaded from process environment variables or `backend/.env`.
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `VITE_API_URL` | Optional for deployed demo, recommended locally | `https://cap-mvp.onrender.com` | Base URL used by the frontend API client. Use `http://localhost:8000` for local backend development. |
+| `NEXT_PUBLIC_API_BASE_URL` | Optional for deployed demo, recommended locally | `https://cap-backend.onrender.com` | Base URL used by the frontend API client. Use `http://localhost:8000` for local backend development. |
 
 ## API Reference
 
-Base URL is controlled by the frontend's `VITE_API_URL`.
+Base URL is controlled by the frontend's `NEXT_PUBLIC_API_BASE_URL`.
 
 ### `GET /health`
 
@@ -433,7 +433,7 @@ npm run build
 Publish `frontend/dist` and set:
 
 ```env
-VITE_API_URL=https://your-backend-url
+NEXT_PUBLIC_API_BASE_URL=https://your-backend-url
 ```
 
 ## Roadmap

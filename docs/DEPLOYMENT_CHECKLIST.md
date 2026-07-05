@@ -9,7 +9,7 @@ Ensure the following variables are configured in both local `.env` and productio
 - `LOG_LEVEL`: `INFO` (or `DEBUG` for troubleshooting)
 
 ### Frontend (Netlify)
-- `VITE_API_URL`: URL of your deployed backend (e.g. `https://cap-backend.onrender.com`)
+- `NEXT_PUBLIC_API_BASE_URL`: URL of your deployed backend (e.g. `https://cap-backend.onrender.com`)
 
 ## Backend Deployment (Render)
 1. **Type**: Web Service

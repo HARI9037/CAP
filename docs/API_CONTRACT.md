@@ -1,7 +1,7 @@
 # CAP MVP API Contract
 
 Base URL:
-- Frontend reads this from `VITE_API_URL`.
+- Frontend reads this from `NEXT_PUBLIC_API_BASE_URL`.
 
 ## GET /health
 Purpose:
