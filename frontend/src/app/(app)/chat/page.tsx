@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClerkApiRequest } from '@/lib/api';
+import type { ChatResponse, ConfirmResponse } from '@/types/chat';
 
 import { ChatInput } from "./components/chat-input";
 import { ChatMessages } from "./components/chat-messages";
@@ -49,7 +50,7 @@ export default function ChatPage() {
     setMessages((current) => [...current, userMessage]);
 
     try {
-      const result = await apiRequest('/chat', {
+      const result = await apiRequest<ChatResponse>('/chat', {
         method: 'POST',
         body: JSON.stringify({ message: message.trim(), session_id: sessionId }),
       });
@@ -88,7 +89,7 @@ export default function ChatPage() {
     setError(null);
 
     try {
-      const result = await apiRequest('/confirm', {
+      const result = await apiRequest<ConfirmResponse>('/confirm', {
         method: 'POST',
         body: JSON.stringify({
           action_id: action.action_id,
@@ -106,8 +107,9 @@ export default function ChatPage() {
       setMemorySummary(result?.memory_summary ?? memorySummary);
       setChatState(remainingActions.length > 0 ? "awaiting_confirmation" : "ready");
 
-      if (typeof result?.execution_result === "string" && result.execution_result.trim()) {
-        setMessages((current) => [...current, createMessage("assistant", result.execution_result)]);
+      const executionResult = result?.execution_result;
+      if (typeof executionResult === "string" && executionResult.trim()) {
+        setMessages((current) => [...current, createMessage("assistant", executionResult)]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

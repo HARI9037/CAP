@@ -16,7 +16,7 @@ function getGetTokenFunction() {
   return null;
 }
 
-export async function apiRequest<T>(
+export async function apiRequest<T = any>(
   path: string,
   init?: RequestInit,
   requiresAuth: boolean = true,
@@ -60,14 +60,22 @@ export async function apiRequest<T>(
 }
 
 // Hook for use in React components
-export function useClerkApiRequest() {
+type ApiRequestFn = <T = unknown>(
+  path: string,
+  init?: RequestInit,
+  requiresAuth?: boolean
+) => Promise<T>;
+
+export function useClerkApiRequest(): ApiRequestFn {
   const { getToken } = useAuth();
 
-  return async function apiRequestWithAuth<T>(
+  const apiRequestWithAuth: ApiRequestFn = function apiRequestWithAuth<T>(
     path: string,
     init?: RequestInit,
     requiresAuth: boolean = true
   ): Promise<T> {
-    return apiRequest(path, init, requiresAuth, getToken);
+    return apiRequest<T>(path, init, requiresAuth, getToken);
   };
+
+  return apiRequestWithAuth;
 }
