@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.memory.store import memory_store
+from app.utils.auth import get_current_user_id
 from app.utils.env import Settings
 from main import create_app
 
@@ -17,8 +18,14 @@ def _settings(db_path):
     )
 
 
+def _app(db_path):
+    app = create_app(settings=_settings(db_path))
+    app.dependency_overrides[get_current_user_id] = lambda: "local-user"
+    return app
+
+
 def test_confirm_approve_executes_once_and_returns_memory_summary(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "confirm.db"))
+    app = _app(tmp_path / "confirm.db")
     action = {
         "action_id": "save-1",
         "action_type": "save",
@@ -30,8 +37,8 @@ def test_confirm_approve_executes_once_and_returns_memory_summary(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("confirm-session")
-        memory_store.store_pending_actions("confirm-session", [action])
+        memory_store.ensure_session("local-user", "confirm-session")
+        memory_store.store_pending_actions("confirm-session", "local-user", [action])
 
         first = client.post(
             "/confirm",
@@ -64,8 +71,46 @@ def test_confirm_approve_executes_once_and_returns_memory_summary(tmp_path):
     assert second["remaining_actions"] == []
 
 
+def test_confirm_approved_action_appears_in_memory_items(tmp_path):
+    app = _app(tmp_path / "confirm-memory.db")
+    action = {
+        "action_id": "save-memory-1",
+        "action_type": "save",
+        "description": "Save launch checklist.",
+        "payload": {
+            "title": "Launch Checklist",
+            "content": "Verify deployment health before announcing launch.",
+        },
+    }
+
+    with TestClient(app) as client:
+        memory_store.ensure_session("local-user", "confirm-memory-session")
+        memory_store.store_pending_actions(
+            "confirm-memory-session", "local-user", [action])
+        response = client.post(
+            "/confirm",
+            json={
+                "action_id": "save-memory-1",
+                "action_type": "save",
+                "approved": True,
+                "session_id": "confirm-memory-session",
+            },
+        )
+        memories_response = client.get("/memory/items")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "approved"
+    memories = memories_response.json()["memories"]
+    assert any(
+        memory["memory_type"] == "approved_action"
+        and memory["title"] == "Launch Checklist"
+        and "Verify deployment health" in memory["content"]
+        for memory in memories
+    )
+
+
 def test_confirm_not_required_returns_standard_response_shape(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "not-required.db"))
+    app = _app(tmp_path / "not-required.db")
     pending_action = {
         "action_id": "save-1",
         "action_type": "save",
@@ -74,8 +119,9 @@ def test_confirm_not_required_returns_standard_response_shape(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("read-session")
-        memory_store.store_pending_actions("read-session", [pending_action])
+        memory_store.ensure_session("local-user", "read-session")
+        memory_store.store_pending_actions(
+            "read-session", "local-user", [pending_action])
         response = client.post(
             "/confirm",
             json={
@@ -96,7 +142,7 @@ def test_confirm_not_required_returns_standard_response_shape(tmp_path):
 
 
 def test_confirm_alias_action_type_resolves_pending_action(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "alias-confirm.db"))
+    app = _app(tmp_path / "alias-confirm.db")
     action = {
         "action_id": "create-1",
         "action_type": "create_note",
@@ -108,8 +154,8 @@ def test_confirm_alias_action_type_resolves_pending_action(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("alias-session")
-        memory_store.store_pending_actions("alias-session", [action])
+        memory_store.ensure_session("local-user", "alias-session")
+        memory_store.store_pending_actions("alias-session", "local-user", [action])
         response = client.post(
             "/confirm",
             json={
@@ -129,7 +175,7 @@ def test_confirm_alias_action_type_resolves_pending_action(tmp_path):
 
 
 def test_confirm_approved_update_returns_visible_description(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "visible-update.db"))
+    app = _app(tmp_path / "visible-update.db")
     action = {
         "action_id": "update-1",
         "action_type": "update",
@@ -138,8 +184,9 @@ def test_confirm_approved_update_returns_visible_description(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("visible-update-session")
-        memory_store.store_pending_actions("visible-update-session", [action])
+        memory_store.ensure_session("local-user", "visible-update-session")
+        memory_store.store_pending_actions(
+            "visible-update-session", "local-user", [action])
         response = client.post(
             "/confirm",
             json={
@@ -159,7 +206,7 @@ def test_confirm_approved_update_returns_visible_description(tmp_path):
 
 
 def test_confirm_rejection_returns_visible_result(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "visible-reject.db"))
+    app = _app(tmp_path / "visible-reject.db")
     action = {
         "action_id": "reject-1",
         "action_type": "update",
@@ -168,8 +215,9 @@ def test_confirm_rejection_returns_visible_result(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("visible-reject-session")
-        memory_store.store_pending_actions("visible-reject-session", [action])
+        memory_store.ensure_session("local-user", "visible-reject-session")
+        memory_store.store_pending_actions(
+            "visible-reject-session", "local-user", [action])
         response = client.post(
             "/confirm",
             json={
@@ -189,7 +237,7 @@ def test_confirm_rejection_returns_visible_result(tmp_path):
 
 
 def test_confirm_pending_read_like_action_still_resolves(tmp_path):
-    app = create_app(settings=_settings(tmp_path / "pending-read.db"))
+    app = _app(tmp_path / "pending-read.db")
     action = {
         "action_id": "custom-1",
         "action_type": "custom_review",
@@ -198,8 +246,8 @@ def test_confirm_pending_read_like_action_still_resolves(tmp_path):
     }
 
     with TestClient(app) as client:
-        memory_store.ensure_session("custom-session")
-        memory_store.store_pending_actions("custom-session", [action])
+        memory_store.ensure_session("local-user", "custom-session")
+        memory_store.store_pending_actions("custom-session", "local-user", [action])
         response = client.post(
             "/confirm",
             json={

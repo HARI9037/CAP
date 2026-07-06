@@ -31,6 +31,11 @@ ACTION_TYPE_ALIASES = {
     "write-file": "write",
 }
 MUTATING_ACTION_TYPES = {"write", "update", "organize", "save", "delete"}
+GROQ_FREE_TIER_SAFE_MAX_TOKENS = {
+    "openai/gpt-oss-20b": 4096,
+    "openai/gpt-oss-120b": 4096,
+}
+GROQ_413_RETRY_MAX_TOKENS = 2048
 PARSE_FALLBACK_REPLY = (
     "I received an empty response from the model. Could you try sending that again?"
 )
@@ -162,6 +167,53 @@ def _ensure_groq_settings(settings: Settings) -> Settings:
     raise ConfigurationError("GROQ_API_KEY is not configured.")
 
 
+def _groq_max_tokens_for_model(settings: Settings) -> int:
+    configured_max_tokens = settings.groq_max_tokens
+    model_cap = GROQ_FREE_TIER_SAFE_MAX_TOKENS.get(settings.groq_model)
+    if model_cap is None:
+        return configured_max_tokens
+    return min(configured_max_tokens, model_cap)
+
+
+def _post_groq_completion(
+    *,
+    payload: dict,
+    headers: dict,
+    settings: Settings,
+) -> httpx.Response:
+    timeout = httpx.Timeout(settings.groq_timeout_seconds)
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(settings.groq_api_url,
+                               json=payload, headers=headers)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if response.status_code != 413 or payload.get("max_tokens") <= GROQ_413_RETRY_MAX_TOKENS:
+                raise
+
+            retry_payload = {
+                **payload,
+                "max_tokens": min(payload["max_tokens"] // 2, GROQ_413_RETRY_MAX_TOKENS),
+            }
+            logger.warning(
+                "Groq returned 413 for model=%s max_tokens=%s; retrying once with max_tokens=%s.",
+                payload.get("model"),
+                payload.get("max_tokens"),
+                retry_payload["max_tokens"],
+            )
+            retry_response = client.post(
+                settings.groq_api_url,
+                json=retry_payload,
+                headers=headers,
+            )
+            try:
+                retry_response.raise_for_status()
+            except httpx.HTTPStatusError:
+                raise exc
+            return retry_response
+        return response
+
+
 def _call_groq_api(
     session_history: list[dict],
     current_phase: str,
@@ -178,19 +230,24 @@ def _call_groq_api(
         "model": settings.groq_model,
         "messages": messages,
         "response_format": {"type": "json_object"},
-        "max_tokens": settings.groq_max_tokens,
+        "max_tokens": _groq_max_tokens_for_model(settings),
     }
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
         "Content-Type": "application/json",
     }
-    timeout = httpx.Timeout(settings.groq_timeout_seconds)
-
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(settings.groq_api_url,
-                               json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+    logger.info(
+        "Sending Groq completion request model=%s max_tokens=%s messages=%s.",
+        payload["model"],
+        payload["max_tokens"],
+        len(messages),
+    )
+    response = _post_groq_completion(
+        payload=payload,
+        headers=headers,
+        settings=settings,
+    )
+    data = response.json()
 
     try:
         choice = data["choices"][0]
@@ -369,6 +426,19 @@ def _extract_action_content(value: object) -> str | None:
         if items:
             return "\n".join(items)
     return None
+
+
+def _action_memory_title(action: dict) -> str:
+    payload = action.get("payload", {})
+    title = payload.get("title") if isinstance(payload, dict) else None
+    if isinstance(title, str) and title.strip():
+        return title.strip()[:120]
+
+    description = action.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()[:120]
+
+    return "Approved action"
 
 
 def _repair_content_generation_response(
@@ -574,6 +644,12 @@ def _build_fallback_result(
     )
 
 
+def _http_error_detail(exc: httpx.HTTPStatusError) -> str:
+    response = exc.response
+    body = response.text[:500] if response is not None else ""
+    return f"status={response.status_code if response is not None else 'unknown'} body={body}"
+
+
 def process_chat_message(
     message: str,
     user_id: str,
@@ -610,15 +686,24 @@ def process_chat_message(
             ),
         )
     except httpx.TimeoutException:
-        logger.exception("Groq request timed out.")
+        logger.exception(
+            "Fallback triggered: Groq request timed out model=%s max_tokens=%s.",
+            settings.groq_model,
+            _groq_max_tokens_for_model(settings),
+        )
         return _build_fallback_result(
             session_id=active_session_id,
             user_id=user_id,
             error="groq_timeout",
             reply=TIMEOUT_FALLBACK_REPLY,
         )
-    except httpx.HTTPStatusError:
-        logger.exception("Groq API returned an error response.")
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "Fallback triggered: Groq API returned an error response model=%s max_tokens=%s %s.",
+            settings.groq_model,
+            _groq_max_tokens_for_model(settings),
+            _http_error_detail(exc),
+        )
         return _build_fallback_result(
             session_id=active_session_id,
             user_id=user_id,
@@ -626,7 +711,11 @@ def process_chat_message(
             reply=TIMEOUT_FALLBACK_REPLY,
         )
     except (httpx.RequestError, RuntimeError, ValueError):
-        logger.exception("Groq request failed.")
+        logger.exception(
+            "Fallback triggered: Groq request failed model=%s max_tokens=%s.",
+            settings.groq_model,
+            _groq_max_tokens_for_model(settings),
+        )
         return _build_fallback_result(
             session_id=active_session_id,
             user_id=user_id,
@@ -638,7 +727,9 @@ def process_chat_message(
         llm_response = _parse_llm_response(raw_llm_response)
     except (ValueError, ValidationError):
         logger.exception(
-            "Groq response could not be parsed as a valid LLMResponse.")
+            "Fallback triggered: Groq response could not be parsed as a valid LLMResponse. raw_response_prefix=%r",
+            raw_llm_response[:500],
+        )
         return _build_fallback_result(
             session_id=active_session_id,
             user_id=user_id,
@@ -842,6 +933,18 @@ def handle_confirmation(
                         execution_result += f"\n\n{visible_payload_content}"
                     elif action_description:
                         execution_result += f"\n\n{action_description}"
+                memory_content = (
+                    _extract_action_content(action_payload)
+                    or action_description
+                    or tool_result["message"]
+                )
+                memory_store.upsert_memory(
+                    title=_action_memory_title(matching_action),
+                    content=memory_content,
+                    memory_type="approved_action",
+                    user_id=user_id,
+                    source_session_id=session_id,
+                )
             else:
                 execution_result = "\u26a0 Action could not be completed at this time."
         except Exception:
