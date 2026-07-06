@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, History, Home, MessageSquarePlus, Settings, Star, Database } from "lucide-react";
+import { Brain, History, MessageSquarePlus, Settings, Star, Database } from "lucide-react";
 
 import { AuthControls } from "@/components/auth-controls";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const nav = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/chat", label: "New Chat", icon: MessageSquarePlus },
   { href: "/history", label: "History", icon: History },
   { href: "/memory", label: "Memory", icon: Database },
@@ -47,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b px-4 md:px-6">
-          <Link href="/dashboard" className="flex items-center gap-2 font-semibold md:hidden">
+          <Link href="/chat" className="flex items-center gap-2 font-semibold md:hidden">
             <Brain className="h-5 w-5 text-primary" />
             CAP
           </Link>

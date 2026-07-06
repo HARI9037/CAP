@@ -32,7 +32,7 @@ export default function LandingPage() {
               CAP is a context-aware AI partner that remembers what matters and helps you make decisions with confidence.
             </p>
             <Button asChild className="mt-8">
-              <Link href="/dashboard">
+              <Link href="/chat">
                 Get Started
                 <ArrowRight className="h-4 w-4" />
               </Link>
