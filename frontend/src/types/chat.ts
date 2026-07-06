@@ -17,3 +17,30 @@ export type ConfirmResponse = {
   execution_result?: string;
   error?: any;
 };
+
+export type HistorySessionSummary = {
+  session_id: string;
+  summary: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
+export type HistoryListResponse = {
+  ok: boolean;
+  conversations: HistorySessionSummary[];
+};
+
+export type HistoryMessage = {
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+};
+
+export type HistoryDetailResponse = {
+  ok: boolean;
+  session_id: string;
+  messages: HistoryMessage[];
+  memory?: any;
+};

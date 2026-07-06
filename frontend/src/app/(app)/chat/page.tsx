@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useClerkApiRequest } from '@/lib/api';
-import type { ChatResponse, ConfirmResponse } from '@/types/chat';
+import type { ChatResponse, ConfirmResponse, HistoryDetailResponse } from '@/types/chat';
 
 import { ChatInput } from "./components/chat-input";
 import { ChatMessages } from "./components/chat-messages";
@@ -17,8 +18,10 @@ function createMessage(role: ChatMessage["role"], content: string): ChatMessage 
   };
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
   const apiRequest = useClerkApiRequest();
+  const searchParams = useSearchParams();
+  const sessionParam = searchParams.get("session");
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,6 +32,54 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!sessionParam) return;
+
+    let active = true;
+    const sessionIdToLoad = sessionParam;
+
+    async function loadSession() {
+      setLoading(true);
+      setError(null);
+      setReply("");
+      setPendingActions([]);
+
+      try {
+        const result = await apiRequest<HistoryDetailResponse>(
+          `/history/${encodeURIComponent(sessionIdToLoad)}`
+        );
+        if (!active) return;
+
+        setSessionId(result.session_id);
+        setMessages(
+          Array.isArray(result.messages)
+            ? result.messages.map((historyMessage) => ({
+                id: historyMessage.message_id,
+                role: historyMessage.role,
+                content: historyMessage.content,
+              }))
+            : []
+        );
+        setMemorySummary(result.memory ?? null);
+        setChatState(result.memory?.workflow_state?.state ?? null);
+        setPendingActions(result.memory?.workflow_state?.pending_actions ?? []);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadSession();
+
+    return () => {
+      active = false;
+    };
+  }, [sessionParam]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -153,5 +204,13 @@ export default function ChatPage() {
 
       <ChatInput value={message} onChange={setMessage} onSubmit={handleSendMessage} loading={loading} />
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageContent />
+    </Suspense>
   );
 }
