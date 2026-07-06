@@ -122,7 +122,7 @@ class Settings:
     groq_api_url: str = "https://api.groq.com/openai/v1/chat/completions"
     groq_model: str = "openai/gpt-oss-20b"
     groq_max_tokens: int = 8192
-    groq_timeout_seconds: float = 8.0
+    groq_timeout_seconds: float = 20.0
     clerk_jwks_url: str | None = None
     clerk_issuer: str | None = None
     supabase_url: str | None = None
@@ -154,7 +154,7 @@ def get_settings() -> Settings:
         groq_max_tokens=_as_int(_env_value("GROQ_MAX_TOKENS"), default=8192),
         groq_timeout_seconds=_as_float(
             _env_value("GROQ_TIMEOUT_SECONDS"),
-            default=8.0,
+            default=20.0,
         ),
         clerk_jwks_url=_env_value("CLERK_JWKS_URL"),
         clerk_issuer=_env_value("CLERK_ISSUER"),
