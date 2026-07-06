@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
@@ -584,7 +584,7 @@ def process_chat_message(
     if settings is None:
         raise RuntimeError("Settings are required for chat orchestration.")
     if model:
-        settings = settings.model_copy(update={"groq_model": model})
+        settings = replace(settings, groq_model=model)
 
     active_session_id = memory_store.ensure_session(user_id=user_id, session_id=session_id)
     memory_store.append_message(active_session_id, "user", message, user_id)
