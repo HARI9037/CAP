@@ -12,6 +12,7 @@ class SettingsPayload(BaseModel):
     model: str | None = Field(default=None, max_length=80)
     memory_enabled: bool | None = None
     confirmation_required: bool | None = None
+    verbose_replies: bool | None = None
 
 
 @router.get("/settings")

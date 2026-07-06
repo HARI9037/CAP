@@ -79,6 +79,7 @@ class MemoryStore:
                 self._create_schema(connection)
                 self._ensure_session_schema(connection)
                 self._ensure_message_schema(connection)
+                self._ensure_settings_schema(connection)
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp ON messages(session_id, timestamp);"
                 )
@@ -149,6 +150,7 @@ class MemoryStore:
                 model TEXT NOT NULL DEFAULT 'gpt-5.5',
                 memory_enabled INTEGER NOT NULL DEFAULT 1,
                 confirmation_required INTEGER NOT NULL DEFAULT 1,
+                verbose_replies INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
             """
@@ -257,6 +259,11 @@ class MemoryStore:
         columns = self._table_columns(connection, "sessions")
         if "user_id" not in columns:
             connection.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local-user';")
+
+    def _ensure_settings_schema(self, connection: sqlite3.Connection | _PostgresConnection) -> None:
+        columns = self._table_columns(connection, "settings")
+        if "verbose_replies" not in columns:
+            connection.execute("ALTER TABLE settings ADD COLUMN verbose_replies INTEGER NOT NULL DEFAULT 0;")
             
     def _ensure_message_schema(self, connection: sqlite3.Connection) -> None:
         columns = self._table_columns(connection, "messages")
@@ -576,7 +583,7 @@ class MemoryStore:
             with self._connect() as connection:
                 row = connection.execute(
                     """
-                    SELECT theme, model, memory_enabled, confirmation_required, updated_at
+                    SELECT theme, model, memory_enabled, confirmation_required, verbose_replies, updated_at
                     FROM settings
                     WHERE user_id = ?;
                     """,
@@ -585,19 +592,20 @@ class MemoryStore:
                 if row is None:
                     connection.execute(
                         """
-                        INSERT INTO settings (user_id, theme, model, memory_enabled, confirmation_required, updated_at)
-                        VALUES (?, 'dark', 'gpt-5.5', 1, 1, ?);
+                        INSERT INTO settings (user_id, theme, model, memory_enabled, confirmation_required, verbose_replies, updated_at)
+                        VALUES (?, 'dark', 'gpt-5.5', 1, 1, 0, ?);
                         """,
                         (user_id, now),
                     )
                     connection.commit()
-                    row = ("dark", "gpt-5.5", 1, 1, now)
+                    row = ("dark", "gpt-5.5", 1, 1, 0, now)
                 return {
                     "theme": row[0],
                     "model": row[1],
                     "memory_enabled": bool(row[2]),
                     "confirmation_required": bool(row[3]),
-                    "updated_at": row[4],
+                    "verbose_replies": bool(row[4]),
+                    "updated_at": row[5],
                 }
 
     def update_settings(self, updates: dict, user_id: str) -> dict:
@@ -609,7 +617,7 @@ class MemoryStore:
                 connection.execute(
                     """
                     UPDATE settings
-                    SET theme = ?, model = ?, memory_enabled = ?, confirmation_required = ?, updated_at = ?
+                    SET theme = ?, model = ?, memory_enabled = ?, confirmation_required = ?, verbose_replies = ?, updated_at = ?
                     WHERE user_id = ?;
                     """,
                     (
@@ -617,6 +625,7 @@ class MemoryStore:
                         merged["model"],
                         int(bool(merged["memory_enabled"])),
                         int(bool(merged["confirmation_required"])),
+                        int(bool(merged["verbose_replies"])),
                         now,
                         user_id,
                     ),

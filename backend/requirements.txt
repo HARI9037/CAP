@@ -7,3 +7,4 @@ httpx
 PyJWT[crypto]
 psycopg2-binary
 sqlalchemy
+requests
