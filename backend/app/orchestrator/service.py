@@ -193,7 +193,13 @@ def _call_groq_api(
         data = response.json()
 
     try:
-        return data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        logger.info(
+            "Groq completion finished with finish_reason=%s model=%s",
+            choice.get("finish_reason"),
+            payload["model"],
+        )
+        return choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(
             "Groq response did not include assistant content.") from exc
@@ -573,9 +579,12 @@ def process_chat_message(
     user_id: str,
     session_id: str | None = None,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> ChatResult:
     if settings is None:
         raise RuntimeError("Settings are required for chat orchestration.")
+    if model:
+        settings = settings.model_copy(update={"groq_model": model})
 
     active_session_id = memory_store.ensure_session(user_id=user_id, session_id=session_id)
     memory_store.append_message(active_session_id, "user", message, user_id)

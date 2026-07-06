@@ -11,7 +11,7 @@ Confirmed `save` and `write` actions execute the session-note tool and update th
 - Python 3.11+
 - FastAPI
 - Pydantic v2
-- Groq API model: `llama-3.1-8b-instant`
+- Groq API model: `openai/gpt-oss-20b`
 - `httpx` synchronous HTTP client
 - SQLite via Python built-in `sqlite3`
 - `python-dotenv` with `dotenv_values`
@@ -89,7 +89,7 @@ Loaded by `app/utils/env.py` from process env or `backend/.env`.
 | `CORS_ORIGINS` | `http://localhost:5173`, `http://127.0.0.1:5173`, `https://cap-mvp.vercel.app` | Allowed frontend origins. |
 | `GROQ_API_KEY` | None | API key for live Groq responses. |
 | `GROQ_API_URL` | `https://api.groq.com/openai/v1/chat/completions` | Groq chat completions endpoint. |
-| `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model name. |
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model name. |
 | `GROQ_TIMEOUT_SECONDS` | `8.0` | Groq request timeout. |
 
 ## Running Locally

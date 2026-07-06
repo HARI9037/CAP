@@ -16,6 +16,13 @@ try:
 except ModuleNotFoundError:
     from backend.app.utils.env import get_settings
 
+DEFAULT_SETTINGS_MODEL = "openai/gpt-oss-20b"
+SUPPORTED_SETTINGS_MODELS = {
+    DEFAULT_SETTINGS_MODEL,
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
@@ -147,7 +154,7 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS settings (
                 user_id TEXT PRIMARY KEY,
                 theme TEXT NOT NULL DEFAULT 'dark',
-                model TEXT NOT NULL DEFAULT 'gpt-5.5',
+                model TEXT NOT NULL DEFAULT 'openai/gpt-oss-20b',
                 memory_enabled INTEGER NOT NULL DEFAULT 1,
                 confirmation_required INTEGER NOT NULL DEFAULT 1,
                 verbose_replies INTEGER NOT NULL DEFAULT 0,
@@ -593,15 +600,27 @@ class MemoryStore:
                     connection.execute(
                         """
                         INSERT INTO settings (user_id, theme, model, memory_enabled, confirmation_required, verbose_replies, updated_at)
-                        VALUES (?, 'dark', 'gpt-5.5', 1, 1, 0, ?);
+                        VALUES (?, 'dark', ?, 1, 1, 0, ?);
                         """,
-                        (user_id, now),
+                        (user_id, DEFAULT_SETTINGS_MODEL, now),
                     )
                     connection.commit()
-                    row = ("dark", "gpt-5.5", 1, 1, 0, now)
+                    row = ("dark", DEFAULT_SETTINGS_MODEL, 1, 1, 0, now)
+                model = row[1]
+                if model not in SUPPORTED_SETTINGS_MODELS:
+                    model = DEFAULT_SETTINGS_MODEL
+                    connection.execute(
+                        """
+                        UPDATE settings
+                        SET model = ?, updated_at = ?
+                        WHERE user_id = ?;
+                        """,
+                        (model, now, user_id),
+                    )
+                    connection.commit()
                 return {
                     "theme": row[0],
-                    "model": row[1],
+                    "model": model,
                     "memory_enabled": bool(row[2]),
                     "confirmation_required": bool(row[3]),
                     "verbose_replies": bool(row[4]),

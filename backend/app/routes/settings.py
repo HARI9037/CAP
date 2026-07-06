@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..memory.store import memory_store
 from ..utils.auth import get_current_user_id
 
 router = APIRouter(tags=["settings"])
+
+ALLOWED_GROQ_MODELS = {
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+}
 
 
 class SettingsPayload(BaseModel):
@@ -13,6 +19,13 @@ class SettingsPayload(BaseModel):
     memory_enabled: bool | None = None
     confirmation_required: bool | None = None
     verbose_replies: bool | None = None
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, value: str | None) -> str | None:
+        if value is not None and value not in ALLOWED_GROQ_MODELS:
+            raise ValueError("Unsupported model selection.")
+        return value
 
 
 @router.get("/settings")

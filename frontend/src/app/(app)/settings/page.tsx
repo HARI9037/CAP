@@ -7,6 +7,12 @@ import { useUser } from "@clerk/nextjs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useClerkApiRequest } from "@/lib/api";
 
+const MODEL_OPTIONS = [
+  { label: "Fast", value: "openai/gpt-oss-20b" },
+  { label: "Balanced", value: "llama-3.3-70b-versatile" },
+  { label: "Deep Reasoning", value: "openai/gpt-oss-120b" },
+] as const;
+
 type SettingsResponse = {
   ok: boolean;
   settings: {
@@ -20,12 +26,14 @@ type SettingsResponse = {
 };
 
 type ToggleKey = "confirmation_required" | "verbose_replies";
+type ModelValue = (typeof MODEL_OPTIONS)[number]["value"];
+type SavingKey = ToggleKey | "model";
 
 export default function SettingsPage() {
   const { user, isLoaded } = useUser();
   const apiRequest = useClerkApiRequest();
   const [settings, setSettings] = useState<SettingsResponse["settings"] | null>(null);
-  const [savingKey, setSavingKey] = useState<ToggleKey | null>(null);
+  const [savingKey, setSavingKey] = useState<SavingKey | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +75,28 @@ export default function SettingsPage() {
       const result = await apiRequest<SettingsResponse>("/settings", {
         method: "PUT",
         body: JSON.stringify({ [key]: value }),
+      });
+      setSettings(result.settings);
+    } catch (err) {
+      setSettings(previous);
+      setError(err instanceof Error ? err.message : "Could not update settings");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  async function updateModel(value: ModelValue) {
+    if (!settings) return;
+
+    const previous = settings;
+    setSavingKey("model");
+    setError(null);
+    setSettings({ ...settings, model: value });
+
+    try {
+      const result = await apiRequest<SettingsResponse>("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ model: value }),
       });
       setSettings(result.settings);
     } catch (err) {
@@ -131,6 +161,26 @@ export default function SettingsPage() {
               </div>
             ) : (
               <>
+                <label className="flex cursor-pointer items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
+                  <span>
+                    <span className="block text-sm font-medium">Model</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                      Choose the model CAP uses for conversation replies.
+                    </span>
+                  </span>
+                  <select
+                    className="min-w-40 rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm outline-none focus:border-primary"
+                    value={settings.model}
+                    disabled={savingKey === "model"}
+                    onChange={(event) => updateModel(event.target.value as ModelValue)}
+                  >
+                    {MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="flex cursor-pointer items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
                   <span>
                     <span className="block text-sm font-medium">Require confirmation for all actions</span>
