@@ -25,6 +25,9 @@ ENV_KEYS = (
     "SUPABASE_SERVICE_ROLE_KEY",
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_API_URL",
 )
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
@@ -34,7 +37,6 @@ DEFAULT_CORS_ORIGINS = (
     "https://cap-mvp.vercel.app",
 )
 PLACEHOLDER_ENV_VALUES = {"<Render Secret>"}
-
 
 def _clean_env_value(raw_value: object) -> str | None:
     if raw_value is None:
@@ -46,30 +48,24 @@ def _clean_env_value(raw_value: object) -> str | None:
         return None
     return value
 
-
 def load_environment() -> None:
     file_values = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
-
     for key in ENV_KEYS:
         process_value = _clean_env_value(os.getenv(key))
         file_value = _clean_env_value(file_values.get(key))
         value = process_value or file_value
-
         if value is not None:
             os.environ[key] = value
         elif key in os.environ and not os.environ[key].strip():
             os.environ.pop(key, None)
 
-
 def _env_value(key: str) -> str | None:
     return _clean_env_value(os.getenv(key))
-
 
 def _as_bool(raw_value: str | None, default: bool = False) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
-
 
 def _parse_cors_origins(raw_value: str | None) -> list[str]:
     origins = list(DEFAULT_CORS_ORIGINS)
@@ -81,7 +77,6 @@ def _parse_cors_origins(raw_value: str | None) -> list[str]:
             origins.append(cleaned)
     return origins
 
-
 def _resolve_db_path(raw_value: str | None) -> Path:
     if not raw_value:
         return (BASE_DIR / "data" / "cap.db").resolve()
@@ -89,7 +84,6 @@ def _resolve_db_path(raw_value: str | None) -> Path:
     if candidate.is_absolute():
         return candidate
     return (BASE_DIR / candidate).resolve()
-
 
 def _as_float(raw_value: str | None, default: float) -> float:
     if raw_value is None:
@@ -99,7 +93,6 @@ def _as_float(raw_value: str | None, default: float) -> float:
     except ValueError:
         return default
 
-
 def _as_int(raw_value: str | None, default: int) -> int:
     if raw_value is None:
         return default
@@ -107,7 +100,6 @@ def _as_int(raw_value: str | None, default: int) -> int:
         return int(raw_value)
     except ValueError:
         return default
-
 
 @dataclass(frozen=True)
 class Settings:
@@ -129,14 +121,14 @@ class Settings:
     supabase_service_role_key: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.5"
-
+    openrouter_api_key: str | None = None
+    openrouter_model: str = "google/gemma-4-26b-a4b-it:free"
+    openrouter_api_url: str = "https://openrouter.ai/api/v1/chat/completions"
 
 def get_settings() -> Settings:
     """Build settings from the current process environment.
-
-    Call :func:`load_environment` (or :func:`initialize_settings`) before this
-    in application code so values from ``backend/.env`` are present.
-    """
+    Call :func:`load_environment` before this in application code
+    so values from .env are present."""
     return Settings(
         app_name=_env_value("APP_NAME") or "CAP Backend",
         app_version=_env_value("APP_VERSION") or "0.1.0",
@@ -146,26 +138,22 @@ def get_settings() -> Settings:
         db_path=_resolve_db_path(_env_value("CAP_DB_PATH")),
         cors_origins=_parse_cors_origins(_env_value("CORS_ORIGINS")),
         groq_api_key=_env_value("GROQ_API_KEY"),
-        groq_api_url=(
-            _env_value("GROQ_API_URL")
-            or "https://api.groq.com/openai/v1/chat/completions"
-        ),
+        groq_api_url=(_env_value("GROQ_API_URL") or "https://api.groq.com/openai/v1/chat/completions"),
         groq_model=_env_value("GROQ_MODEL") or "openai/gpt-oss-20b",
         groq_max_tokens=_as_int(_env_value("GROQ_MAX_TOKENS"), default=8192),
-        groq_timeout_seconds=_as_float(
-            _env_value("GROQ_TIMEOUT_SECONDS"),
-            default=20.0,
-        ),
+        groq_timeout_seconds=_as_float(_env_value("GROQ_TIMEOUT_SECONDS"), default=20.0),
         clerk_jwks_url=_env_value("CLERK_JWKS_URL"),
         clerk_issuer=_env_value("CLERK_ISSUER"),
         supabase_url=_env_value("SUPABASE_URL"),
         supabase_service_role_key=_env_value("SUPABASE_SERVICE_ROLE_KEY"),
         openai_api_key=_env_value("OPENAI_API_KEY"),
         openai_model=_env_value("OPENAI_MODEL") or "gpt-5.5",
+        openrouter_api_key=_env_value("OPENROUTER_API_KEY"),
+        openrouter_model=_env_value("OPENROUTER_MODEL") or "google/gemma-4-26b-a4b-it:free",
+        openrouter_api_url=_env_value("OPENROUTER_API_URL") or "https://openrouter.ai/api/v1/chat/completions",
     )
 
-
 def initialize_settings() -> Settings:
-    """Load ``backend/.env`` once for this process, then return application settings."""
+    """Load .env once for this process, then return application settings."""
     load_environment()
     return get_settings()
